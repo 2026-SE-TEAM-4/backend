@@ -1,0 +1,19 @@
+[project]
+name = "backend"
+version = "0.1.0"
+description = "서버 예약/할당 관리 시스템 백엔드 (API 서버 + APScheduler)"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "sqlalchemy[asyncio]>=2.0",
+    "asyncpg>=0.30",
+    "alembic>=1.13",
+    "pydantic-settings>=2.5",
+    "redis>=5.1",
+    "apscheduler>=3.10",
+]
+
+# 애플리케이션 프로젝트(라이브러리 아님)이므로 빌드/설치 대상이 아니다.
+[tool.uv]
+package = false
