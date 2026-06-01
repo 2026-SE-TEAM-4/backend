@@ -16,5 +16,8 @@ class ServerMetric(Base):
     cpu_usage: Mapped[float] = mapped_column(Float)
     mem_usage: Mapped[float] = mapped_column(Float)
     net_usage: Mapped[float] = mapped_column(Float)
-    status: Mapped[str] = mapped_column(String(20))  # 수집 시점의 서버 상태
+    # GPU 사용률(%). 서버풀 /metrics gpuUsage 계약과 매핑. GPU 미탑재 노드는 null.
+    gpu_usage: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # 수집 품질(MetricStatus: OK/MISSING/NA). 에이전트는 OK만, 나머지는 수집기가 판정.
+    status: Mapped[str] = mapped_column(String(20))
     collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

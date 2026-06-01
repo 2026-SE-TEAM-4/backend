@@ -36,3 +36,15 @@ class ApprovalStatus(str, Enum):
     APPROVED = "APPROVED"
     REJECTED = "REJECTED"
     AUTO_REJECTED = "AUTO_REJECTED"
+
+
+class MetricStatus(str, Enum):
+    """ServerMetric 수집 품질 상태(서버풀 /metrics 계약과 일치).
+
+    에이전트는 응답하는 한 항상 OK만 보낸다. MISSING(무응답)·NA(항목 미지원)는
+    백엔드 수집기가 수집 시점에 판정해 기록한다.
+    """
+
+    OK = "OK"
+    MISSING = "MISSING"
+    NA = "NA"
