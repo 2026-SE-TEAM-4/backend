@@ -5,11 +5,16 @@ CLAUDE.local.md
 
 # 환경 변수(비밀값 포함)
 .env
+.env.*
+!.env.example
 
 # 파이썬
 __pycache__/
 *.py[cod]
 .venv/
+*.egg-info/
+build/
+dist/
 
 # 도구 캐시
 .pytest_cache/
