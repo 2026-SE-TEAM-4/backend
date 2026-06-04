@@ -7,7 +7,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import auth
+from app.api import approval_requests, auth, reservations
 
 app = FastAPI(title="서버 예약/할당 관리 시스템 API")
 
@@ -20,6 +20,8 @@ app.add_middleware(
 )
 
 app.include_router(auth.router)
+app.include_router(reservations.router)
+app.include_router(approval_requests.router)
 
 
 @app.get("/health")
