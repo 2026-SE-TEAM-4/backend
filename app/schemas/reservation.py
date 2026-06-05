@@ -13,6 +13,12 @@ class ReservationCreate(BaseModel):
     end_time: datetime = Field(alias="endTime")
 
 
+class ReservationInstantCreate(BaseModel):
+    model_config = {"populate_by_name": True}
+
+    end_time: datetime = Field(alias="endTime")
+
+
 class ReservationResponse(BaseModel):
     model_config = {"from_attributes": True}
 
