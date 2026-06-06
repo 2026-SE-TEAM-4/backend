@@ -1,8 +1,13 @@
 """승인 요청 도메인 응답 스키마."""
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel
+
+
+class DecisionRequest(BaseModel):
+    action: Literal["APPROVED", "REJECTED"]
 
 
 class ApprovalRequestResponse(BaseModel):
