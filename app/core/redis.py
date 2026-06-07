@@ -35,3 +35,8 @@ async def increment_login_fail(email: str) -> int:
 
 async def reset_login_fail(email: str) -> None:
     await get_redis().delete(_fail_key(email))
+
+
+async def publish_notification(user_id: int, data: str) -> None:
+    """알림 생성 시 해당 사용자의 WS 채널에 발행한다."""
+    await get_redis().publish(f"notifications:{user_id}", data)
