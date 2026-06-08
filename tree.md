@@ -17,11 +17,27 @@ backend/
 │   ├── api/                   # 도메인별 라우터 (1 도메인 = 1 파일 권장)
 │   │                          # auth, users, teams, servers,
 │   │                          # reservations, approvals, metrics ...
+│   │   ├── deps.py            # DB 세션 등 FastAPI 공통 의존성
+│   │   ├── ops.py             # 운영 대시보드·가용성 조회 API
+│   │   ├── servers.py         # 서버 등록·조회·삭제·점검·대안 조회 API
+│   │   └── users.py           # 계정 잠금 해제 API
 │   ├── models/                # SQLAlchemy ORM 모델
 │   ├── schemas/               # Pydantic 입출력 스키마
+│   │   ├── ops.py             # 운영 API 스키마
+│   │   ├── servers.py         # 서버 API 스키마
+│   │   └── users.py           # 사용자 운영 API 스키마
 │   ├── services/              # 비즈니스 로직 (라우터에서 호출)
+│   │   ├── monitoring.py      # 메트릭 수집·이상 탐지·건강 점수·자동 회수 로직
+│   │   ├── ops.py             # 운영 집계·가용성 산출
+│   │   ├── servers.py         # 서버·점검·대안 서버 로직
+│   │   └── users.py           # 사용자 운영 로직
 │   ├── jobs/                  # APScheduler 잡 (UC14, 15, 16, 18, 19)
+│   │   ├── health.py          # 서버 건강 점수 산출
+│   │   ├── idle.py            # 유휴 서버 감지·자동 회수
+│   │   └── monitoring.py      # 사용률 수집·이상 징후 탐지
 │   └── core/                  # 보안·예외·공통 의존성 (cross-cutting)
+│       ├── exceptions.py      # 서비스 계층 예외
+│       └── rate_limit.py      # 비정상 접근 감지·일시 잠금 미들웨어
 ├── alembic/                   # DB 마이그레이션
 │   └── versions/              # 생성된 리비전 파일
 ├── tests/
