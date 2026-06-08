@@ -1,8 +1,4 @@
-"""APScheduler 진입점 (별도 컨테이너).
-
-지금은 등록된 잡이 없다. 자동화 잡(UC14·15·16·18·19)은 후속 단계에서
-services/jobs를 재사용해 등록한다. 프로세스는 잡 대기를 위해 살려 둔다.
-"""
+"""APScheduler 진입점 (별도 컨테이너)."""
 
 import asyncio
 import logging
@@ -25,7 +21,7 @@ async def main() -> None:
     scheduler.add_job(calculate_health_scores, "interval", minutes=10, id="calculate_health_scores")
     scheduler.add_job(reclaim_idle_servers, "interval", minutes=15, id="reclaim_idle_servers")
     scheduler.start()
-    logger.info("스케줄러 시작됨 (메트릭 수집 주기=%ss)", settings.scheduler_interval_sec)
+    logger.info("스케줄러 시작됨 (기본 주기=%ss)", settings.scheduler_interval_sec)
     await asyncio.Event().wait()
 
 

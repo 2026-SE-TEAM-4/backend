@@ -16,9 +16,14 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://app:app@postgres:5432/app"
     redis_url: str = "redis://redis:6379/0"
 
-    # 인증 (구현은 후속 단계)
+    # 인증 (JWT 단일 액세스 토큰)
     jwt_secret: str = "dev-secret-change-me"
     jwt_expire_min: int = 60
+
+    # 로그인 실패 잠금 (UC23). 카운트는 Redis, 잠금만 user.locked_until에 영속화한다.
+    login_fail_max: int = 5  # 연속 실패 임계. 도달 시 계정 잠금
+    login_fail_window_sec: int = 300  # 실패 카운트 집계 창(Redis TTL)
+    login_lock_min: int = 15  # 잠금 지속(분). UC20과 동일 값
 
     # 스케줄러 / 서버풀 메트릭 수집 (수집 구현은 후속 단계)
     scheduler_interval_sec: int = 60
