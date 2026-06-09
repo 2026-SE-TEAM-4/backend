@@ -15,28 +15,59 @@ backend/
 │   ├── config.py              # 환경 설정 (Pydantic Settings)
 │   ├── database.py            # SQLAlchemy 엔진 / 세션
 │   ├── api/                   # 도메인별 라우터 (1 도메인 = 1 파일 권장)
-│   │   ├── approvals.py
+│   │   ├── auth.py            # 회원가입 / 로그인
+│   │   ├── approval_requests.py
 │   │   ├── notifications.py
-│   │   └── reservations.py
+│   │   ├── reservations.py
+│   │   ├── teams.py
+│   │   └── ws.py             # WebSocket (실시간 알림 등)
 │   ├── models/                # SQLAlchemy ORM 모델
+│   │   ├── enums.py          # 공용 Enum 정의
+│   │   ├── user.py
+│   │   ├── team.py
+│   │   ├── server.py
+│   │   ├── server_metric.py
+│   │   ├── reservation.py
+│   │   ├── queue_entry.py
+│   │   ├── approval_request.py
+│   │   ├── quota.py
+│   │   ├── notification.py
+│   │   ├── maintenance_schedule.py
+│   │   ├── anomaly_record.py
+│   │   ├── audit_log.py
+│   │   └── scheduler_log.py
 │   ├── schemas/               # Pydantic 입출력 스키마
+│   │   ├── auth.py
 │   │   ├── approval_request.py
 │   │   ├── notification.py
+│   │   ├── quota.py
 │   │   └── reservation.py
 │   ├── services/              # 비즈니스 로직 (라우터에서 호출)
+│   │   ├── auth_service.py
 │   │   ├── approval_service.py
 │   │   ├── notification_service.py
+│   │   ├── quota_service.py
 │   │   └── reservation_service.py
+│   ├── jobs/                  # APScheduler 잡 구현 (scheduler.py 가 등록)
+│   │   ├── approval_jobs.py
+│   │   └── reservation_jobs.py
 │   └── core/                  # 보안·예외·공통 의존성 (cross-cutting)
-│       └── deps.py
+│       ├── deps.py           # FastAPI 의존성
+│       ├── security.py       # 비밀번호 해시 / JWT 등
+│       └── redis.py          # Redis 클라이언트
 ├── alembic/                   # DB 마이그레이션
 │   └── versions/              # 생성된 리비전 파일
+├── tests/                     # 테스트
+│   ├── unit/                  # 단위 테스트
+│   └── integration/           # 통합 테스트 (conftest.py 포함)
 ├── scripts/                   # 운영 스크립트 (seed, dump 등)
+│   └── seed.py
 ├── pyproject.toml             # uv 기반 의존성·도구 설정
 ├── uv.lock
 ├── alembic.ini                # alembic 설정
 ├── Dockerfile                 # api / scheduler 공통 이미지
 ├── docker-compose.yml         # api + scheduler + postgres + redis
+├── .env.example               # 환경 변수 예시
 ├── README.md
 ├── tree.md                    # 본 파일
 └── rule.md                    # 코딩 규칙
@@ -51,3 +82,5 @@ backend/
   내보내지 않는다 (직렬화·필드 제어를 위함).
 - `core/` 는 여러 도메인이 공유하는 코드만 둔다. 한 도메인에만 쓰이면 해당
   도메인 폴더로 옮긴다.
+- `jobs/` 는 APScheduler 가 주기 실행하는 잡 구현을 둔다. `scheduler.py` 가
+  이 잡들을 등록한다. 잡 내부 로직도 가능하면 `services/` 를 재사용한다.
