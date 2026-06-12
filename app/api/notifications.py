@@ -21,3 +21,13 @@ async def get_notifications(
     모든 역할이 접근 가능하며 본인 알림만 반환한다.
     """
     return await notification_service.list_notifications(current_user, db)
+
+
+@router.patch("/{notification_id}/read", response_model=NotificationResponse)
+async def read_notification(
+    notification_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> NotificationResponse:
+    """알림 읽음 처리 [UC03-a]. 본인 알림만. 없으면 404, 타인 알림 403."""
+    return await notification_service.mark_read(notification_id, current_user, db)
