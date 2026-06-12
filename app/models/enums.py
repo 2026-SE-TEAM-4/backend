@@ -57,3 +57,18 @@ class MetricType(str, Enum):
     MEM = "MEM"
     NET = "NET"
     GPU = "GPU"
+
+
+class IncidentSeverity(str, Enum):
+    """인시던트 심각도(UC24). 이상 개수·서버 수·최고 편차로 산출."""
+
+    INFO = "INFO"
+    WARNING = "WARNING"
+    CRITICAL = "CRITICAL"
+
+
+class IncidentStatus(str, Enum):
+    """인시던트 생애주기(UC24). 새 이상이 한동안 없으면 RESOLVED 로 자동 종료."""
+
+    OPEN = "OPEN"
+    RESOLVED = "RESOLVED"

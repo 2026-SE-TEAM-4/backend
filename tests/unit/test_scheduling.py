@@ -26,4 +26,5 @@ def test_register_jobs_registers_all_expected_jobs():
         "metric_collection": timedelta(minutes=1),
         "anomaly_detection": timedelta(minutes=5),
         "health_score": timedelta(minutes=10),
+        "incident_correlation": timedelta(minutes=5),
     }

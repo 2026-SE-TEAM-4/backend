@@ -7,7 +7,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import approval_requests, auth, notifications, reservations, teams, ws
+from app.api import approval_requests, auth, notifications, ops, reservations, teams, ws
 
 # 주기 잡은 스케줄러 컨테이너(app/scheduler.py)가 단독으로 돌린다. API 프로세스는
 # 잡을 등록하지 않는다(잡 이중 실행 방지). 잡 목록은 app/jobs/scheduling.py 참조.
@@ -28,6 +28,7 @@ app.include_router(approval_requests.router)
 app.include_router(notifications.router)
 app.include_router(teams.router)
 app.include_router(ws.router)
+app.include_router(ops.router)
 
 
 @app.get("/health")

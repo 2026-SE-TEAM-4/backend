@@ -19,3 +19,7 @@ class AnomalyRecord(Base):
     mean: Mapped[float] = mapped_column(Float)
     stddev: Mapped[float] = mapped_column(Float)
     detected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # 상관 잡이 이 이상을 묶은 인시던트(UC24). 미할당이면 NULL.
+    incident_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("incident.id"), nullable=True
+    )
