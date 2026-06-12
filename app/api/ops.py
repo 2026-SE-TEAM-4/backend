@@ -9,13 +9,14 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_db, require_role
-from app.models import AnomalyRecord, Forecast, Incident, User
+from app.models import AnomalyRecord, Forecast, Incident, IncidentSummary, User
 from app.schemas.ops import (
     AnomalyResponse,
     ForecastResponse,
     IncidentDetailResponse,
     IncidentListResponse,
     IncidentResponse,
+    IncidentSummaryResponse,
 )
 
 router = APIRouter(prefix="/ops", tags=["ops"])
@@ -69,6 +70,25 @@ async def get_incident(
         incident=IncidentResponse.model_validate(incident),
         anomalies=[AnomalyResponse.model_validate(anomaly) for anomaly in anomalies],
     )
+
+
+@router.get("/incidents/{incident_id}/summary", response_model=IncidentSummaryResponse)
+async def get_incident_summary(
+    incident_id: int,
+    _user: User = Depends(require_role("MGR", "ADM")),
+    db: AsyncSession = Depends(get_db),
+) -> IncidentSummaryResponse:
+    """인시던트 LLM 원인 요약 조회 [UC25]. 아직 생성 전이면 404.
+
+    요약 잡(incident_summary_job)이 스케줄러 컨테이너에서 만들어 저장한 자문용 요약을
+    그대로 읽는다. 404 는 키 미설정·데이터 부족 등으로 아직 요약이 없음을 뜻한다.
+    """
+    summary = await db.scalar(
+        select(IncidentSummary).where(IncidentSummary.incident_id == incident_id)
+    )
+    if summary is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "인시던트 요약을 찾을 수 없습니다.")
+    return IncidentSummaryResponse.model_validate(summary)
 
 
 @router.get("/forecast", response_model=ForecastResponse)

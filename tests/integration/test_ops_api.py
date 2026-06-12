@@ -14,7 +14,7 @@ import pytest_asyncio
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 import app.models  # noqa: F401  메타데이터 등록
-from app.models import AnomalyRecord, Forecast, Incident, Server
+from app.models import AnomalyRecord, Forecast, Incident, IncidentSummary, Server
 
 
 def _server(server_id: int) -> Server:
@@ -192,5 +192,57 @@ async def test_get_forecast_forbidden_for_student(client):
     token = await _register_and_login(client, email="stu-fc@b.com", role="STU")
     response = await client.get(
         "/ops/forecast?serverId=1&metric=CPU", headers={"Authorization": f"Bearer {token}"}
+    )
+    assert response.status_code == 403
+
+
+async def _seed_incident_with_summary(seed_session) -> int:
+    """인시던트 1건과 그 요약을 적재하고 인시던트 id 를 돌려준다."""
+    async with seed_session() as db:
+        incident = Incident(severity="WARNING", status="OPEN", anomaly_count=1, server_ids=[1])
+        db.add(incident)
+        await db.flush()  # 인시던트 먼저 적재(요약의 FK 대상)
+        db.add(IncidentSummary(
+            incident_id=incident.id,
+            situation="서버 1 CPU 과부하",
+            root_causes=[{"cause": "CPU 과부하", "evidence": "서버 1 CPU 99%"}],
+            recommendations=[{"action": "부하 분산", "rationale": "단일 서버 포화 완화"}],
+            model="claude-haiku-4-5-20251001",
+        ))
+        await db.commit()
+        return incident.id
+
+
+async def test_get_incident_summary_returns_stored_summary_for_admin(client, seed_session):
+    incident_id = await _seed_incident_with_summary(seed_session)
+
+    token = await _register_and_login(client, email="adm-sum@b.com", role="ADM")
+    response = await client.get(
+        f"/ops/incidents/{incident_id}/summary",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["incidentId"] == incident_id
+    assert body["situation"] == "서버 1 CPU 과부하"
+    assert body["rootCauses"][0]["cause"] == "CPU 과부하"
+    assert body["recommendations"][0]["action"] == "부하 분산"
+    assert body["model"] == "claude-haiku-4-5-20251001"
+
+
+async def test_get_incident_summary_missing_returns_404(client):
+    # 요약이 아직 생성되지 않은 인시던트(또는 없는 인시던트)는 404.
+    token = await _register_and_login(client, email="mgr-sum@b.com", role="MGR")
+    response = await client.get(
+        "/ops/incidents/999999/summary", headers={"Authorization": f"Bearer {token}"}
+    )
+    assert response.status_code == 404
+
+
+async def test_get_incident_summary_forbidden_for_student(client):
+    token = await _register_and_login(client, email="stu-sum@b.com", role="STU")
+    response = await client.get(
+        "/ops/incidents/1/summary", headers={"Authorization": f"Bearer {token}"}
     )
     assert response.status_code == 403

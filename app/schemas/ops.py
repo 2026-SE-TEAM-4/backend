@@ -59,3 +59,22 @@ class ForecastResponse(BaseModel):
     confidence: float
     # 향후 시점별 예측점 목록 [{ts, yhat, lower, upper}]. JSONB 를 그대로 전달한다.
     horizon: list[dict]
+
+
+class IncidentSummaryResponse(BaseModel):
+    """인시던트 LLM 원인 요약(UC25). 잡이 저장한 자문용 요약을 그대로 노출한다.
+
+    LLM 이 작성한 분석 결과로, 사람이 검토해야 한다(자동 조치 없음). root_causes 는
+    [{cause, evidence}], recommendations 는 [{action, rationale}] JSONB 를 그대로 전달한다.
+    """
+
+    # 응답 필드명 `model`(요약을 만든 모델 id)이 Pydantic 의 model_ 예약 접두어와 겹쳐
+    # 경고가 나므로, 이 스키마에서는 보호 네임스페이스를 비워 충돌을 없앤다.
+    model_config = ConfigDict(from_attributes=True, protected_namespaces=())
+
+    incident_id: int = Field(serialization_alias="incidentId")
+    generated_at: datetime = Field(serialization_alias="generatedAt")
+    model: str
+    situation: str
+    root_causes: list[dict] = Field(serialization_alias="rootCauses")
+    recommendations: list[dict]

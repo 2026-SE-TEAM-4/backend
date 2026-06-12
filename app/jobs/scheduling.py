@@ -12,6 +12,7 @@ from app.jobs.approval_jobs import auto_reject_timed_out_requests
 from app.jobs.forecast_job import generate_forecasts
 from app.jobs.health_score_job import compute_health_scores
 from app.jobs.incident_correlation_job import correlate_anomalies
+from app.jobs.incident_summary_job import summarize_pending_incidents
 from app.jobs.metric_collection_job import collect_server_metrics
 from app.jobs.reservation_jobs import process_reservation_transitions
 
@@ -39,3 +40,6 @@ def register_jobs(scheduler: AsyncIOScheduler) -> None:
     # F31: 용량·수요 예측(Holt-Winters, 7일)
     scheduler.add_job(generate_forecasts, "interval", minutes=60,
                       id="forecast", replace_existing=True)
+    # F34: LLM 원인 요약(OPEN 인시던트당 1회, 키 없으면 잡 내부에서 건너뜀)
+    scheduler.add_job(summarize_pending_incidents, "interval", minutes=5,
+                      id="incident_summary", replace_existing=True)

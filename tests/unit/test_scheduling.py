@@ -28,4 +28,5 @@ def test_register_jobs_registers_all_expected_jobs():
         "health_score": timedelta(minutes=10),
         "incident_correlation": timedelta(minutes=5),
         "forecast": timedelta(minutes=60),
+        "incident_summary": timedelta(minutes=5),
     }

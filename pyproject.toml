@@ -22,6 +22,9 @@ dependencies = [
     "numpy>=2.0",
     "pandas>=2.2",
     "statsmodels>=0.14",
+    # LLM 원인 요약 잡(F34)이 인시던트 요약을 만들 때 Anthropic API 를 호출한다.
+    # 스케줄러 컨테이너에서만 동작하며, API 키가 없으면 잡은 건너뛴다.
+    "anthropic>=0.40",
 ]
 
 [dependency-groups]
