@@ -5,12 +5,12 @@
 인시던트당 한 번만 생성한다(이미 요약이 있으면 다시 만들지 않는다 → 호출 비용 절감).
 
 안전·보안:
-- API 키는 settings.anthropic_api_key(환경 변수)에서만 온다. 비어 있으면 경고만 남기고
+- API 키는 settings.gemini_api_key(환경 변수)에서만 온다. 비어 있으면 경고만 남기고
   건너뛴다(키 없이도 앱·다른 잡은 정상 동작).
 - LLM 은 읽기 전용 분석만 한다(설계 D-4). 요약은 저장·표시만 하며 자동 조치는 없다.
 
 테스트 용이성:
-- Anthropic 클라이언트를 주입(client) 받는다. 기본값 None 이면 일이 있고 키가 있을 때만
+- Gemini 클라이언트를 주입(client) 받는다. 기본값 None 이면 일이 있고 키가 있을 때만
   지연 생성한다. 테스트는 stub 클라이언트를 주입해 네트워크 없이 검증한다.
 - 프롬프트 조립·응답 파싱은 순수 모듈(services/incident_summary)에 두어 결정적이다.
 """
@@ -30,15 +30,19 @@ from app.services.incident_summary import build_context, build_prompt, parse_sum
 logger = logging.getLogger(__name__)
 
 
-# 잡이 의존하는 Anthropic 클라이언트의 최소 계약만 적은 덕타이핑 Protocol.
-# 실제 SDK(anthropic.AsyncAnthropic)와 테스트 stub 이 같은 모양만 갖추면 서로
-# 갈아 끼울 수 있게 하려는 의도다(잡은 messages.create 한 가지만 쓴다).
-class _Messages(Protocol):
-    async def create(self, *, model: str, max_tokens: int, messages: list) -> object: ...
+# 잡이 의존하는 Gemini 클라이언트의 최소 계약만 적은 덕타이핑 Protocol.
+# 실제 SDK(google.genai.Client)와 테스트 stub 이 같은 모양만 갖추면 서로
+# 갈아 끼울 수 있게 하려는 의도다(잡은 aio.models.generate_content 한 가지만 쓴다).
+class _Models(Protocol):
+    async def generate_content(self, *, model: str, contents: str, config: dict) -> object: ...
+
+
+class _Aio(Protocol):
+    models: _Models
 
 
 class _LLMClient(Protocol):
-    messages: _Messages
+    aio: _Aio
 
 # 한 인시던트 요약에 허용하는 최대 토큰. 상황·원인·권장 정도의 짧은 JSON 이면 충분하다.
 _MAX_TOKENS = 1024
@@ -53,8 +57,8 @@ async def summarize_pending_incidents(
 
     키가 없으면 조용히 건너뛴다. 인시던트별 실패는 격리해 다른 인시던트 요약은 계속한다.
     """
-    if not settings.anthropic_api_key:
-        logger.warning("ANTHROPIC_API_KEY 가 없어 인시던트 요약 잡을 건너뜁니다.")
+    if not settings.gemini_api_key:
+        logger.warning("GEMINI_API_KEY 가 없어 인시던트 요약 잡을 건너뜁니다.")
         return
 
     async with session_factory() as db:
@@ -99,10 +103,10 @@ async def _summarize_one(db: AsyncSession, incident: Incident, client: _LLMClien
     try:
         context = await _build_incident_context(db, incident)
         prompt = build_prompt(context)
-        response = await client.messages.create(
-            model=settings.anthropic_model,
-            max_tokens=_MAX_TOKENS,
-            messages=[{"role": "user", "content": prompt}],
+        response = await client.aio.models.generate_content(
+            model=settings.gemini_model,
+            contents=prompt,
+            config={"max_output_tokens": _MAX_TOKENS},
         )
         parsed = parse_summary(_response_text(response))
         db.add(IncidentSummary(
@@ -110,7 +114,7 @@ async def _summarize_one(db: AsyncSession, incident: Incident, client: _LLMClien
             situation=parsed.situation,
             root_causes=parsed.root_causes,
             recommendations=parsed.recommendations,
-            model=settings.anthropic_model,
+            model=settings.gemini_model,
         ))
     except Exception as error:
         logger.warning("인시던트 %s 요약 건너뜀: %s", incident.id, error)
@@ -186,25 +190,20 @@ async def _recent_metrics(db: AsyncSession, server_ids: list[int]) -> list[Serve
 
 
 def _response_text(response: object) -> str:
-    """Anthropic 응답 객체에서 텍스트 블록만 이어 붙인다.
+    """Gemini 응답 객체에서 생성된 텍스트를 꺼낸다.
 
-    content 는 블록 리스트이고 텍스트 블록은 .text 를 갖는다. 텍스트가 아닌 블록은
-    건너뛴다(요약 잡은 JSON 텍스트만 필요로 한다).
+    google-genai 응답은 .text 에 합쳐진 텍스트를 담는다. 없으면 빈 문자열을 돌려주고,
+    뒤의 parse_summary 가 JSON 이 아닌 응답을 걸러 해당 인시던트를 건너뛴다.
     """
-    parts = []
-    for block in getattr(response, "content", []) or []:
-        text = getattr(block, "text", None)
-        if text is not None:
-            parts.append(text)
-    return "".join(parts)
+    return getattr(response, "text", None) or ""
 
 
 def _build_client() -> _LLMClient:
-    """키가 있을 때만 Anthropic 비동기 클라이언트를 지연 생성한다.
+    """키가 있을 때만 Gemini 비동기 클라이언트를 지연 생성한다.
 
-    import 를 함수 안에 두는 이유: anthropic 패키지는 스케줄러 컨테이너에만 필요하고,
+    import 를 함수 안에 두는 이유: google-genai 패키지는 스케줄러 컨테이너에만 필요하고,
     이 잡이 실제로 일할 때만 의존하도록 하기 위함이다.
     """
-    import anthropic
+    from google import genai
 
-    return anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
+    return genai.Client(api_key=settings.gemini_api_key)

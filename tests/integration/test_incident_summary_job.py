@@ -1,6 +1,6 @@
 """LLM 원인 요약 잡 통합 테스트(UC25, Postgres 컨테이너 필요).
 
-실제 Anthropic API 는 절대 호출하지 않는다. stub 비동기 클라이언트를 주입해
+실제 Gemini API 는 절대 호출하지 않는다. stub 비동기 클라이언트를 주입해
 정해진 JSON 을 돌려주게 하고, 잡이 그것을 파싱해 IncidentSummary 로 저장하는지 본다.
 
 - OPEN 인시던트 + 이상 + 메트릭 시드 → stub 주입 → IncidentSummary 1건 저장
@@ -16,7 +16,6 @@ import pytest_asyncio
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-import app.jobs.incident_summary_job as incident_summary_job
 import app.models  # noqa: F401  메타데이터 등록
 from app.config import settings
 from app.database import Base
@@ -26,34 +25,43 @@ from app.models import AnomalyRecord, Incident, IncidentSummary, Server, ServerM
 pytestmark = pytest.mark.integration
 
 
-# stub 응답을 흉내 내는 가벼운 객체들. 실제 Anthropic SDK 와 같은 모양만 갖춘다
-# (response.content 는 .text 를 가진 블록 리스트).
-class _StubBlock:
+# stub 응답을 흉내 내는 가벼운 객체들. 실제 google-genai SDK 와 같은 모양만 갖춘다
+# (client.aio.models.generate_content(...) 가 .text 를 가진 응답을 돌려준다).
+class _StubResponse:
     def __init__(self, text: str) -> None:
         self.text = text
 
 
-class _StubMessage:
-    def __init__(self, text: str) -> None:
-        self.content = [_StubBlock(text)]
-
-
-class _StubMessages:
+class _StubModels:
     def __init__(self, payload: dict) -> None:
         self._payload = payload
         self.calls = 0
 
-    async def create(self, **kwargs) -> _StubMessage:
+    async def generate_content(self, **kwargs) -> _StubResponse:
         # 네트워크 없이 정해진 JSON 을 돌려준다. 호출 횟수를 세어 캐시(1회 호출)를 검증한다.
         self.calls += 1
-        return _StubMessage(json.dumps(self._payload))
+        return _StubResponse(json.dumps(self._payload))
+
+
+class _StubAio:
+    def __init__(self, models: _StubModels) -> None:
+        self.models = models
 
 
 class _StubClient:
-    """Anthropic 비동기 클라이언트 자리에 주입하는 stub. client.messages.create 만 흉내."""
+    """google-genai 비동기 클라이언트 자리에 주입하는 stub.
 
-    def __init__(self, payload: dict) -> None:
-        self.messages = _StubMessages(payload)
+    client.aio.models.generate_content 한 가지만 흉내 낸다. payload(dict)를 주면
+    기본 stub 응답을, models 인스턴스를 주면 그대로 써서 인시던트별 분기를 흉내 낸다.
+    """
+
+    def __init__(self, payload_or_models) -> None:
+        models = (
+            payload_or_models
+            if hasattr(payload_or_models, "generate_content")
+            else _StubModels(payload_or_models)
+        )
+        self.aio = _StubAio(models)
 
 
 def _server_ids_in_prompt(prompt: str) -> set[int]:
@@ -114,7 +122,7 @@ async def _seed_open_incident(factory) -> int:
 
 async def test_summarizes_open_incident_and_stores_one_row(factory, monkeypatch):
     # 키가 있는 것처럼 두고 stub 클라이언트를 주입한다(실제 네트워크 없음).
-    monkeypatch.setattr(settings, "anthropic_api_key", "test-key")
+    monkeypatch.setattr(settings, "gemini_api_key", "test-key")
     incident_id = await _seed_open_incident(factory)
     stub = _StubClient(_VALID_PAYLOAD)
 
@@ -132,14 +140,14 @@ async def test_summarizes_open_incident_and_stores_one_row(factory, monkeypatch)
     assert summary.situation.startswith("서버 1")
     assert summary.root_causes[0]["cause"] == "CPU 과부하"
     assert summary.recommendations[0]["action"] == "부하 분산"
-    assert summary.model == settings.anthropic_model
+    assert summary.model == settings.gemini_model
     # 인시던트 1건 → 호출도 1회여야 한다(비용 절감).
-    assert stub.messages.calls == 1
+    assert stub.aio.models.calls == 1
 
 
 async def test_does_not_regenerate_when_summary_exists(factory, monkeypatch):
     # 이미 요약이 있으면 다시 만들지 않는다(인시던트당 1회 보장 → 추가 호출 없음).
-    monkeypatch.setattr(settings, "anthropic_api_key", "test-key")
+    monkeypatch.setattr(settings, "gemini_api_key", "test-key")
     await _seed_open_incident(factory)
 
     first = _StubClient(_VALID_PAYLOAD)
@@ -154,12 +162,12 @@ async def test_does_not_regenerate_when_summary_exists(factory, monkeypatch):
 
     # 요약은 여전히 1건이고, 두 번째 실행은 LLM 을 호출하지 않았다.
     assert len(summaries) == 1
-    assert second.messages.calls == 0
+    assert second.aio.models.calls == 0
 
 
 async def test_skips_gracefully_when_api_key_missing(factory, monkeypatch):
     # 키가 비어 있으면 요약을 만들지 않고 조용히 건너뛴다(크래시 없음).
-    monkeypatch.setattr(settings, "anthropic_api_key", "")
+    monkeypatch.setattr(settings, "gemini_api_key", "")
     await _seed_open_incident(factory)
     stub = _StubClient(_VALID_PAYLOAD)
 
@@ -169,12 +177,12 @@ async def test_skips_gracefully_when_api_key_missing(factory, monkeypatch):
         summaries = (await db.execute(select(IncidentSummary))).scalars().all()
 
     assert summaries == []
-    assert stub.messages.calls == 0
+    assert stub.aio.models.calls == 0
 
 
 async def test_one_failing_incident_does_not_block_others(factory, monkeypatch):
     # 한 인시던트의 응답 파싱이 깨져도 다른 인시던트 요약은 저장되어야 한다(잡 격리).
-    monkeypatch.setattr(settings, "anthropic_api_key", "test-key")
+    monkeypatch.setattr(settings, "gemini_api_key", "test-key")
     now = datetime.now(tz=timezone.utc)
     async with factory() as db:
         db.add_all([
@@ -197,20 +205,18 @@ async def test_one_failing_incident_does_not_block_others(factory, monkeypatch):
     # 서버 2가 묶인 인시던트(bad)에는 깨진 JSON 을, 나머지에는 정상 JSON 을 돌려준다.
     # 프롬프트 문자열 조각이 아니라 프롬프트에 박힌 컨텍스트(serverIds)를 구조적으로
     # 읽어 라우팅한다. 이렇게 두면 프롬프트 서식이 바뀌어도 라우팅이 조용히 깨지지 않는다.
-    class _MixedMessages(_StubMessages):
-        async def create(self, **kwargs):
+    class _MixedModels(_StubModels):
+        async def generate_content(self, **kwargs):
             self.calls += 1
-            prompt = kwargs["messages"][0]["content"]
+            prompt = kwargs["contents"]
             server_ids = _server_ids_in_prompt(prompt)
             if 2 in server_ids:
-                return _StubMessage("깨진 응답: JSON 아님")
-            return _StubMessage(json.dumps(_VALID_PAYLOAD))
+                return _StubResponse("깨진 응답: JSON 아님")
+            return _StubResponse(json.dumps(_VALID_PAYLOAD))
 
-    class _MixedClient:
-        def __init__(self) -> None:
-            self.messages = _MixedMessages(_VALID_PAYLOAD)
-
-    await summarize_pending_incidents(session_factory=factory, client=_MixedClient())
+    await summarize_pending_incidents(
+        session_factory=factory, client=_StubClient(_MixedModels(_VALID_PAYLOAD))
+    )
 
     async with factory() as db:
         good_rows = (
@@ -233,20 +239,16 @@ async def test_malformed_response_stores_nothing_and_does_not_raise(factory, mon
     # 요약 JSON 이 아닌 평문이 와도 잡은 예외를 밖으로 던지지 않고(격리),
     # 해당 인시던트를 그냥 건너뛴다(IncidentSummary 0건). _response_text →
     # parse_summary → skip 경로를 잡 경계에서 직접 검증한다.
-    monkeypatch.setattr(settings, "anthropic_api_key", "test-key")
+    monkeypatch.setattr(settings, "gemini_api_key", "test-key")
     incident_id = await _seed_open_incident(factory)
 
-    class _ProseMessages(_StubMessages):
-        async def create(self, **kwargs):
+    class _ProseModels(_StubModels):
+        async def generate_content(self, **kwargs):
             # 코드펜스도 JSON 도 아닌 평범한 산문. parse_summary 가 거른다.
             self.calls += 1
-            return _StubMessage("CPU 사용률이 높아 보입니다. 확인이 필요합니다.")
+            return _StubResponse("CPU 사용률이 높아 보입니다. 확인이 필요합니다.")
 
-    class _ProseClient:
-        def __init__(self) -> None:
-            self.messages = _ProseMessages(_VALID_PAYLOAD)
-
-    stub = _ProseClient()
+    stub = _StubClient(_ProseModels(_VALID_PAYLOAD))
     # 예외가 위로 전파되지 않아야 한다(잡 격리). 전파되면 이 호출에서 테스트가 깨진다.
     await summarize_pending_incidents(session_factory=factory, client=stub)
 
@@ -259,4 +261,4 @@ async def test_malformed_response_stores_nothing_and_does_not_raise(factory, mon
 
     # 파싱 실패로 저장은 0건이고, 모델 호출은 한 번 일어났다(시도는 했다).
     assert summaries == []
-    assert stub.messages.calls == 1
+    assert stub.aio.models.calls == 1

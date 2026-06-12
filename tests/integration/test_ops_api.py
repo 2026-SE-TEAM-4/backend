@@ -207,7 +207,7 @@ async def _seed_incident_with_summary(seed_session) -> int:
             situation="서버 1 CPU 과부하",
             root_causes=[{"cause": "CPU 과부하", "evidence": "서버 1 CPU 99%"}],
             recommendations=[{"action": "부하 분산", "rationale": "단일 서버 포화 완화"}],
-            model="claude-haiku-4-5-20251001",
+            model="gemini-3.1-flash-lite",
         ))
         await db.commit()
         return incident.id
@@ -228,7 +228,7 @@ async def test_get_incident_summary_returns_stored_summary_for_admin(client, see
     assert body["situation"] == "서버 1 CPU 과부하"
     assert body["rootCauses"][0]["cause"] == "CPU 과부하"
     assert body["recommendations"][0]["action"] == "부하 분산"
-    assert body["model"] == "claude-haiku-4-5-20251001"
+    assert body["model"] == "gemini-3.1-flash-lite"
 
 
 async def test_get_incident_summary_missing_returns_404(client):
