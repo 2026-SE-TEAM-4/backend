@@ -61,6 +61,29 @@ class ForecastResponse(BaseModel):
     horizon: list[dict]
 
 
+class HealthTrendPoint(BaseModel):
+    """건강점수 이력의 한 점(UC23). 스파크라인용 시점·점수."""
+
+    ts: datetime
+    health_score: int = Field(serialization_alias="healthScore")
+
+
+class HealthTrendResponse(BaseModel):
+    """서버 건강·위험 추세(UC23). 잡이 저장한 위험도·이력으로 추세를 노출한다.
+
+    trend 는 저장된 이력의 기울기로 다시 계산한다(IMPROVING/STABLE/DEGRADING).
+    drivers 는 위험의 근거 문구 목록이다.
+    """
+
+    server_id: int = Field(serialization_alias="serverId")
+    health_score: int | None = Field(serialization_alias="healthScore")
+    risk_score: float | None = Field(serialization_alias="riskScore")
+    trend: str
+    eta_to_risk: datetime | None = Field(serialization_alias="etaToRisk")
+    history: list[HealthTrendPoint]
+    drivers: list[str]
+
+
 class IncidentSummaryResponse(BaseModel):
     """인시던트 LLM 원인 요약(UC25). 잡이 저장한 자문용 요약을 그대로 노출한다.
 

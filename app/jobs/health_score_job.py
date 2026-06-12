@@ -2,6 +2,8 @@
 
 10분 주기로 활성 서버의 최신 메트릭·최근 이상빈도·수집 누락률로 건강점수를 산출해
 Server.health_score 에 반영한다. 즉시예약 선정(reservation_service)이 이 값으로 정렬한다.
+같은 실행에서 시점별 점수를 ServerHealthHistory 에도 한 행 남겨, 장애 예측 잡(UC23)이
+7일 추세 기울기를 낼 수 있게 한다.
 
 낙관적 락 주의: Server.version 은 예약 흐름이 동시성 제어에 쓴다. 건강점수 갱신이
 version 을 올리면 동시 예약 갱신과 불필요하게 충돌하므로, version 을 건드리지 않는
@@ -15,7 +17,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.database import SessionLocal
-from app.models import AnomalyRecord, Server, ServerMetric
+from app.models import AnomalyRecord, Server, ServerHealthHistory, ServerMetric
 from app.models.enums import MetricStatus
 from app.services.health import compute_health_score
 
@@ -41,6 +43,9 @@ async def compute_health_scores(*, session_factory: async_sessionmaker = Session
                 await db.execute(
                     update(Server).where(Server.id == server.id).values(health_score=score)
                 )
+                # 추세(7일 기울기) 계산을 위해 시점별 점수 이력도 함께 남긴다(UC23).
+                # Server.health_score 는 최신값만 들고 있어 추세를 낼 수 없기 때문이다.
+                db.add(ServerHealthHistory(server_id=server.id, score=score))
             await db.commit()
         except Exception:
             await db.rollback()

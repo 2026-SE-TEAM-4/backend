@@ -19,7 +19,7 @@ from app.database import Base
 from app.jobs.anomaly_detection_job import detect_anomalies
 from app.jobs.health_score_job import compute_health_scores
 from app.jobs.metric_collection_job import collect_server_metrics
-from app.models import AnomalyRecord, Server, ServerMetric
+from app.models import AnomalyRecord, Server, ServerHealthHistory, ServerMetric
 
 pytestmark = pytest.mark.integration
 
@@ -140,3 +140,22 @@ async def test_health_score_set_without_bumping_version(factory):
         server = await db.get(Server, 1)
     assert server.health_score == 68  # 100 - (cpu 16 + mem 16)
     assert server.version == 1  # 건강점수 갱신이 낙관적 락을 건드리지 않는다
+
+
+async def test_health_score_appends_history_row(factory):
+    # 건강점수를 산출한 같은 실행에서 ServerHealthHistory 에 한 행이 남아야 한다(UC23 추세용).
+    async with factory() as db:
+        db.add(_server(1))
+        db.add(ServerMetric(server_id=1, cpu_usage=100.0, mem_usage=100.0,
+               net_usage=10.0, gpu_usage=None, status="OK"))
+        await db.commit()
+
+    await compute_health_scores(session_factory=factory)
+
+    async with factory() as db:
+        history = (await db.execute(select(ServerHealthHistory))).scalars().all()
+        server = await db.get(Server, 1)
+    assert len(history) == 1
+    assert history[0].server_id == 1
+    assert history[0].score == 68  # Server.health_score 와 같은 값을 이력에도 남긴다
+    assert server.version == 1  # 이력 추가가 낙관적 락을 건드리지 않는다

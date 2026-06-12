@@ -74,6 +74,17 @@ class IncidentStatus(str, Enum):
     RESOLVED = "RESOLVED"
 
 
+class TrendDirection(str, Enum):
+    """건강점수 추세 방향(UC23). 7일 EWMA 기울기를 데드밴드로 분류한다.
+
+    IMPROVING(개선)·STABLE(안정)·DEGRADING(열화). 열화일 때만 위험·점검 권고가 의미 있다.
+    """
+
+    IMPROVING = "IMPROVING"
+    STABLE = "STABLE"
+    DEGRADING = "DEGRADING"
+
+
 class ForecastMetric(str, Enum):
     """용량·수요 예측이 다루는 대상(UC22). Forecast.metric 값.
 

@@ -9,6 +9,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from app.jobs.anomaly_detection_job import detect_anomalies
 from app.jobs.approval_jobs import auto_reject_timed_out_requests
+from app.jobs.failure_prediction_job import predict_failures
 from app.jobs.forecast_job import generate_forecasts
 from app.jobs.health_score_job import compute_health_scores
 from app.jobs.incident_correlation_job import correlate_anomalies
@@ -43,3 +44,6 @@ def register_jobs(scheduler: AsyncIOScheduler) -> None:
     # F34: LLM 원인 요약(OPEN 인시던트당 1회, 키 없으면 잡 내부에서 건너뜀)
     scheduler.add_job(summarize_pending_incidents, "interval", minutes=5,
                       id="incident_summary", replace_existing=True)
+    # F32: 장애·건강 열화 예측(7일 추세 + 위험도, F28 직후)
+    scheduler.add_job(predict_failures, "interval", minutes=10,
+                      id="failure_prediction", replace_existing=True)
