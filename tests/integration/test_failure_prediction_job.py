@@ -112,6 +112,35 @@ async def test_eta_is_set_when_declining_above_danger(factory):
     assert server.eta_to_risk > now  # 위험 진입은 미래 시점이다
 
 
+async def _seed_flat_history(db, server_id: int, *, score: int, now: datetime) -> None:
+    # 7일간 같은 점수로 평탄한 이력(기울기 0 → 위험에 하락 가중이 없다).
+    for day_offset in range(7):
+        recorded_at = now - timedelta(days=day_offset)
+        db.add(ServerHealthHistory(server_id=server_id, score=score, recorded_at=recorded_at))
+
+
+async def test_risk_just_below_threshold_sends_no_notification(factory):
+    # 평탄 이력·이상 없음·건강 51 → 위험은 (100-51)=49 로 임계(50) 바로 아래.
+    # 알림 임계 경계를 못 박는다: 49 에서는 ADM 알림이 생기지 않아야 한다.
+    now = datetime.now(tz=timezone.utc)
+    async with factory() as db:
+        db.add(Team(id=1, name="Lab", code="LAB", total_quota_limit=10))
+        db.add(_server(3, health_score=51))
+        db.add(_admin(102))
+        await db.flush()
+        await _seed_flat_history(db, 3, score=51, now=now)
+        await db.commit()
+
+    await predict_failures(session_factory=factory)
+
+    async with factory() as db:
+        server = await db.get(Server, 3)
+        notifications = (await db.execute(select(Notification))).scalars().all()
+
+    assert server.risk_score == 49.0
+    assert notifications == []  # 임계(50) 미만이므로 알림이 없어야 한다
+
+
 async def test_healthy_improving_server_has_low_risk_and_no_notification(factory):
     now = datetime.now(tz=timezone.utc)
     async with factory() as db:

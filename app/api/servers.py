@@ -33,6 +33,9 @@ async def get_health_trend(
 
     잡이 저장한 risk_score·eta_to_risk 와 최근 7일 건강점수 이력을 돌려준다. trend 는
     이력 기울기로 다시 계산하고, drivers 는 기울기·이상빈도·현재건강으로 근거를 만든다.
+
+    trend·drivers 는 요청 시점의 저장된 이력으로 즉석 계산하고, riskScore·etaToRisk 는
+    마지막 장애 예측 잡이 저장한 스냅샷이다(둘은 서로 다른 시점의 값일 수 있다).
     """
     server = await db.get(Server, server_id)
     if server is None:

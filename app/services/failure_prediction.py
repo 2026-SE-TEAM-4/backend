@@ -15,6 +15,8 @@
 
 from datetime import datetime, timedelta
 
+from app.models.enums import TrendDirection
+
 # --- 추세 분류 데드밴드 -----------------------------------------------------
 # 하루당 |기울기| 가 이 값 이하이면 흔들림으로 보고 STABLE 로 둔다(미세 변동 무시).
 _STABLE_DEADBAND_PER_DAY = 1.0
@@ -35,15 +37,14 @@ _RISK_MAX = 100.0
 # EWMA 평활 계수. 최근 변화에 더 민감하도록 0.5 로 둔다(학부 수준의 단순한 선택).
 _EWMA_ALPHA = 0.5
 
-# 하루를 시간으로 환산(기울기를 "하루당"으로 맞추기 위함).
-_HOURS_PER_DAY = 24.0
+# 초를 일로 환산(기울기를 "하루당"으로 맞추기 위함).
+_SECONDS_PER_DAY = 86400.0
 
 
-def ewma_slope(history: list[tuple[datetime, float]] | list[float]) -> float:
+def ewma_slope(history: list[tuple[datetime, float]]) -> float:
     """건강점수 시계열의 하루당 기울기를 EWMA 로 추정한다(없으면 0).
 
-    입력은 (시각, 점수) 쌍 목록(권장) 또는 점수만의 목록이다. 점수만 주어지면
-    표본 간격을 모르므로 1시간 간격으로 가정한다(잡은 시각 쌍으로 호출한다).
+    입력은 (시각, 점수) 쌍의 시간순 목록이다.
 
     방법: 연속한 두 표본의 (점수차 / 시간차[일]) 를 순간 기울기로 보고, 최근값에
     가중을 더 주는 EWMA 로 누적한다. 양수면 개선, 음수면 열화. 단순·가독 우선이다.
@@ -54,7 +55,7 @@ def ewma_slope(history: list[tuple[datetime, float]] | list[float]) -> float:
 
     ewma: float | None = None
     for index in range(1, len(scores)):
-        days = (times[index] - times[index - 1]).total_seconds() / 86400.0
+        days = (times[index] - times[index - 1]).total_seconds() / _SECONDS_PER_DAY
         if days <= 0:
             continue  # 같은 시각·역행 표본은 기울기를 왜곡하므로 건너뛴다.
         instant_slope = (scores[index] - scores[index - 1]) / days
@@ -71,10 +72,10 @@ def classify_trend(slope: float) -> str:
     |기울기| 가 데드밴드 이하이면 STABLE. 그 밖에는 부호로 가른다(양수 개선, 음수 열화).
     """
     if slope > _STABLE_DEADBAND_PER_DAY:
-        return "IMPROVING"
+        return TrendDirection.IMPROVING.value
     if slope < -_STABLE_DEADBAND_PER_DAY:
-        return "DEGRADING"
-    return "STABLE"
+        return TrendDirection.DEGRADING.value
+    return TrendDirection.STABLE.value
 
 
 def compute_risk_score(
@@ -147,21 +148,9 @@ def risk_drivers(
 
 
 def _split_history(
-    history: list[tuple[datetime, float]] | list[float],
+    history: list[tuple[datetime, float]],
 ) -> tuple[list[datetime], list[float]]:
-    """이력을 (시각 목록, 점수 목록)으로 가른다.
-
-    (시각, 점수) 쌍이면 그대로 풀고, 점수만의 목록이면 1시간 간격 시각을 합성한다.
-    """
-    if not history:
-        return [], []
-    if isinstance(history[0], tuple):
-        times = [point[0] for point in history]  # type: ignore[index]
-        scores = [float(point[1]) for point in history]  # type: ignore[index]
-        return times, scores
-
-    # 점수만 주어진 경우: 간격을 모르므로 1시간 등간격으로 본다(테스트 편의용 경로).
-    base = datetime(2026, 1, 1)
-    scores = [float(value) for value in history]  # type: ignore[arg-type]
-    times = [base + timedelta(hours=i) for i in range(len(scores))]
+    """(시각, 점수) 쌍 목록을 (시각 목록, 점수 목록)으로 가른다."""
+    times = [point[0] for point in history]
+    scores = [float(point[1]) for point in history]
     return times, scores

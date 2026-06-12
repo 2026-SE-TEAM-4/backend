@@ -98,6 +98,25 @@ async def test_health_trend_forbidden_for_student(client, seed_session):
     assert response.status_code == 403
 
 
+async def test_health_trend_empty_history_returns_stable(client, seed_session):
+    # 건강점수 이력이 전혀 없는 서버: history 는 비고, 기울기가 정의 안 돼 trend 는 STABLE,
+    # 근거 신호도 없어 drivers 는 빈 목록이며 200 으로 응답한다.
+    async with seed_session() as db:
+        db.add(_server(4, health_score=100, risk_score=0.0))
+        await db.commit()
+
+    token = await _register_and_login(client, email="adm-ht-empty@b.com", role="ADM")
+    response = await client.get(
+        "/servers/4/health-trend", headers={"Authorization": f"Bearer {token}"}
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["history"] == []
+    assert body["trend"] == "STABLE"
+    assert body["drivers"] == []
+
+
 async def test_health_trend_missing_server_returns_404(client):
     token = await _register_and_login(client, email="adm-ht404@b.com", role="ADM")
     response = await client.get(

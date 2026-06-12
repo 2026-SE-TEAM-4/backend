@@ -39,10 +39,10 @@ logger = logging.getLogger(__name__)
 _HISTORY_WINDOW = timedelta(days=7)
 _ANOMALY_WINDOW = timedelta(hours=24)
 
-# 위험도가 이 값 이상이면 ADM 에게 점검 권고 알림을 보낸다(0~100).
+# 두 임계는 단위가 다른 독립 기준이다. _RISK_THRESHOLD 는 위험도(0~100) 알림 기준,
+# _DANGER_HEALTH 는 건강점수(0~100) 단위의 위험 진입선이다. 그래서 어떤 서버는 고위험이라
+# 알림을 받으면서도 eta_to_risk 가 None 일 수 있다(이미 위험선 아래거나 하락 추세가 아닐 때).
 _RISK_THRESHOLD = 50.0
-
-# 건강점수가 이 값으로 떨어지면 위험으로 본다(eta_to_risk 외삽 기준).
 _DANGER_HEALTH = 50
 
 
@@ -54,15 +54,21 @@ async def predict_failures(*, session_factory: async_sessionmaker = SessionLocal
             servers = (
                 await db.execute(select(Server).where(Server.deleted_at.is_(None)))
             ).scalars().all()
+            # ADM 목록을 잡 1회당 한 번만 읽는다(서버마다 다시 조회하던 N+1 제거).
+            admins = (
+                await db.execute(select(User).where(User.role == UserRole.ADM.value))
+            ).scalars().all()
             for server in servers:
-                await _predict_one_server(db, server, now)
+                await _predict_one_server(db, server, now, admins)
             await db.commit()
         except Exception:
             await db.rollback()
             logger.exception("장애 예측 잡 실패")
 
 
-async def _predict_one_server(db: AsyncSession, server: Server, now: datetime) -> None:
+async def _predict_one_server(
+    db: AsyncSession, server: Server, now: datetime, admins: list[User]
+) -> None:
     """한 서버의 위험도·위험 진입 시각을 산출해 반영하고, 고위험이면 알림을 만든다."""
     history = await _health_history(db, server.id, now)
     slope = ewma_slope(history)
@@ -91,7 +97,7 @@ async def _predict_one_server(db: AsyncSession, server: Server, now: datetime) -
             anomaly_count_24h=anomaly_count,
             current_health=server.health_score,
         )
-        await _notify_admins_of_risk(db, server, risk, eta, drivers)
+        await _notify_admins_of_risk(db, server, risk, eta, drivers, admins)
 
 
 async def _health_history(
@@ -130,6 +136,7 @@ async def _notify_admins_of_risk(
     risk: float,
     eta: datetime | None,
     drivers: list[str],
+    admins: list[User],
 ) -> None:
     """ADM 사용자 각각에게 장애 예측 알림 1건씩 만든다(점검 권고 포함).
 
@@ -137,18 +144,17 @@ async def _notify_admins_of_risk(
     예측 잡이 서버 상태(점검창)에 부수효과를 내면 안 되고, 점검창 생성은 운영자가
     판단해 직접 하도록 두기 위함이다(자동 조치 금지, 사람 검토).
     """
+    # 예측 장애 알림은 운영 담당자인 ADM 에게만 보낸다. MGR 은 API 로 추세를 조회할 수 있다.
     eta_text = eta.isoformat() if eta is not None else None
-    admins = (
-        await db.execute(select(User).where(User.role == UserRole.ADM.value))
-    ).scalars().all()
+    risk_rounded = round(risk)  # 메시지와 payload 의 위험도 표기를 같은 값으로 맞춘다.
     for admin in admins:
         db.add(Notification(
             user_id=admin.id,
             type="PREDICTIVE_FAILURE",
-            message=f"서버 {server.id}의 장애 위험이 높습니다(위험도 {round(risk)}). 점검을 권고합니다.",
+            message=f"서버 {server.id}의 장애 위험이 높습니다(위험도 {risk_rounded}). 점검을 권고합니다.",
             payload={
                 "serverId": server.id,
-                "riskScore": risk,
+                "riskScore": risk_rounded,
                 "etaToRisk": eta_text,
                 "drivers": drivers,
             },
