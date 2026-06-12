@@ -14,6 +14,7 @@ from app.database import SessionLocal
 from app.models import AnomalyRecord, Server, ServerMetric
 from app.models.enums import MetricStatus, MetricType
 from app.services.anomaly import MIN_SAMPLES, evaluate_anomaly
+from app.services.scheduler_log import add_scheduler_log
 
 logger = logging.getLogger(__name__)
 
@@ -40,15 +41,19 @@ async def detect_anomalies(*, session_factory: async_sessionmaker = SessionLocal
             servers = (
                 await db.execute(select(Server).where(Server.deleted_at.is_(None)))
             ).scalars().all()
+            recorded = 0
             for server in servers:
-                await _detect_for_server(db, server.id, now)
+                recorded += await _detect_for_server(db, server.id, now)
+            # 대시보드(F21)용 실행 이력: 이번에 기록한 이상 건수를 처리량으로 남긴다.
+            add_scheduler_log(db, "UC18", recorded)
             await db.commit()
         except Exception:
             await db.rollback()
             logger.exception("이상탐지 잡 실패")
 
 
-async def _detect_for_server(db: AsyncSession, server_id: int, now: datetime) -> None:
+async def _detect_for_server(db: AsyncSession, server_id: int, now: datetime) -> int:
+    """한 서버의 메트릭별 이상을 판정·기록하고, 이번에 기록한 이상 건수를 반환한다."""
     rows = (
         await db.execute(
             select(ServerMetric)
@@ -62,6 +67,7 @@ async def _detect_for_server(db: AsyncSession, server_id: int, now: datetime) ->
         )
     ).scalars().all()
 
+    recorded = 0
     for metric, attr in _METRIC_ATTR.items():
         values = [getattr(r, attr) for r in rows if getattr(r, attr) is not None]
         if len(values) < MIN_SAMPLES + 1:  # 최신값 1개 + 기준선 표본
@@ -76,7 +82,9 @@ async def _detect_for_server(db: AsyncSession, server_id: int, now: datetime) ->
                 mean=decision.mean,
                 stddev=decision.stddev,
             ))
+            recorded += 1
             logger.info("이상 감지: 서버 %d %s 값 %.1f", server_id, metric.value, latest)
+    return recorded
 
 
 async def _recently_recorded(db: AsyncSession, server_id: int, metric: str, now: datetime) -> bool:

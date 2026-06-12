@@ -22,6 +22,7 @@ from app.database import SessionLocal
 from app.models import AnomalyRecord, Incident, Notification, Server, User
 from app.models.enums import IncidentStatus, UserRole
 from app.services.incident import compute_severity
+from app.services.scheduler_log import add_scheduler_log
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +40,8 @@ async def correlate_anomalies(*, session_factory: async_sessionmaker = SessionLo
             for server_ids, anomalies in groups.values():
                 await _correlate_group(db, server_ids, anomalies)
             await _auto_resolve_stale(db, now)
+            # 대시보드(F21)용 실행 이력: 이번에 인시던트로 묶은 그룹 수를 처리량으로 남긴다.
+            add_scheduler_log(db, "UC24", len(groups))
             await db.commit()
         except Exception:
             await db.rollback()

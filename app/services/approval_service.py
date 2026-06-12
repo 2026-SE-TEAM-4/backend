@@ -8,7 +8,51 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import ApprovalRequest, Quota, Reservation, Server, User
 from app.models.enums import ApprovalStatus, ReservationStatus, ServerStatus, UserRole
-from app.schemas.approval_request import DecisionRequest
+from app.schemas.approval_request import CreateApprovalRequest, DecisionRequest
+
+
+async def create_approval_request(
+    req: CreateApprovalRequest,
+    current_user: User,
+    db: AsyncSession,
+) -> ApprovalRequest:
+    """Quota 초과 승인 요청 생성 [UC08 / F09].
+
+    서버 존재 여부와 시작 < 종료 조건을 검증한 뒤 PENDING 상태의 ApprovalRequest를 생성한다.
+    approver_id는 결재 시점에 채워지므로 여기서는 null로 둔다.
+    """
+    if req.startTime >= req.endTime:
+        # 시작 시각이 종료 시각보다 같거나 늦으면 의미 없는 요청이다.
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "startTime은 endTime보다 이전이어야 합니다.")
+
+    server = await db.get(Server, req.serverId)
+    if server is None or server.deleted_at is not None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "서버를 찾을 수 없습니다.")
+
+    # 같은 서버·기간에 이미 PENDING 요청이 있으면 중복 생성을 막는다.
+    duplicate = await db.scalar(
+        select(ApprovalRequest).where(
+            ApprovalRequest.requester_id == current_user.id,
+            ApprovalRequest.server_id == req.serverId,
+            ApprovalRequest.status == ApprovalStatus.PENDING.value,
+        )
+    )
+    if duplicate is not None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "동일 서버에 대한 PENDING 요청이 이미 존재합니다.")
+
+    approval = ApprovalRequest(
+        requester_id=current_user.id,
+        approver_id=None,
+        server_id=req.serverId,
+        requested_start=req.startTime,
+        requested_end=req.endTime,
+        reason=req.reason,
+        status=ApprovalStatus.PENDING.value,
+    )
+    db.add(approval)
+    await db.commit()
+    await db.refresh(approval)
+    return approval
 
 
 async def list_approval_requests(

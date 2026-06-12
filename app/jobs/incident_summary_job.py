@@ -26,6 +26,7 @@ from app.database import SessionLocal
 from app.models import AnomalyRecord, Incident, IncidentSummary, Server, ServerMetric
 from app.models.enums import IncidentStatus
 from app.services.incident_summary import build_context, build_prompt, parse_summary
+from app.services.scheduler_log import add_scheduler_log
 
 logger = logging.getLogger(__name__)
 
@@ -68,8 +69,12 @@ async def summarize_pending_incidents(
                 return
             # 처리할 인시던트가 있고 키가 있을 때만 클라이언트를 지연 생성한다.
             client = client or _build_client()
+            summarized = 0
             for incident in incidents:
-                await _summarize_one(db, incident, client)
+                summarized += await _summarize_one(db, incident, client)
+            # 대시보드(F21)용 실행 이력: 실제로 요약을 생성한(일이 있었던) 경우에만 남긴다.
+            # 키가 없거나 대상이 없어 일찍 return 한 경로는 실행 이력을 남기지 않는다.
+            add_scheduler_log(db, "UC25", summarized)
             await db.commit()
         except Exception:
             await db.rollback()
@@ -94,11 +99,12 @@ async def _find_open_incidents_without_summary(db: AsyncSession) -> list[Inciden
     return list(rows.scalars().all())
 
 
-async def _summarize_one(db: AsyncSession, incident: Incident, client: _LLMClient) -> None:
+async def _summarize_one(db: AsyncSession, incident: Incident, client: _LLMClient) -> int:
     """한 인시던트의 컨텍스트를 모아 LLM 요약을 만들고 IncidentSummary 로 저장한다.
 
     한 인시던트의 실패(호출 오류·파싱 실패)가 전체 잡을 멈추지 않도록 여기서 잡아
     경고만 남기고 건너뛴다. 다른 인시던트는 계속 요약한다.
+    저장에 성공하면 1, 실패로 건너뛰면 0 을 반환한다(처리량 집계용).
     """
     try:
         context = await _build_incident_context(db, incident)
@@ -116,8 +122,10 @@ async def _summarize_one(db: AsyncSession, incident: Incident, client: _LLMClien
             recommendations=parsed.recommendations,
             model=settings.gemini_model,
         ))
+        return 1
     except Exception as error:
         logger.warning("인시던트 %s 요약 건너뜀: %s", incident.id, error)
+        return 0
 
 
 async def _build_incident_context(db: AsyncSession, incident: Incident) -> dict:

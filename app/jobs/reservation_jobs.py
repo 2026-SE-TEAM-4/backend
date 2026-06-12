@@ -13,6 +13,7 @@ from sqlalchemy import select, update
 from app.database import SessionLocal
 from app.models import Quota, Reservation, Server
 from app.models.enums import ReservationStatus, ServerStatus
+from app.services.scheduler_log import add_scheduler_log
 
 logger = logging.getLogger(__name__)
 
@@ -21,16 +22,18 @@ async def process_reservation_transitions() -> None:
     """만료·사용 시작 대상 예약을 일괄 전이한다."""
     async with SessionLocal() as db:
         try:
-            await _start_in_use(db)
-            await _expire_reservations(db)
+            started = await _start_in_use(db)
+            expired = await _expire_reservations(db)
+            # 대시보드(F21)용 실행 이력: 이번에 전이한 예약 수를 처리량으로 남긴다.
+            add_scheduler_log(db, "UC16", started + expired)
             await db.commit()
         except Exception:
             await db.rollback()
             logger.exception("예약 자동 전이 잡 실패")
 
 
-async def _start_in_use(db) -> None:
-    """start_time이 도래한 RESERVED 예약을 IN_USE로 전환한다."""
+async def _start_in_use(db) -> int:
+    """start_time이 도래한 RESERVED 예약을 IN_USE로 전환한다(전이 건수 반환)."""
     now = datetime.now(tz=timezone.utc)
 
     rows = await db.execute(
@@ -51,9 +54,11 @@ async def _start_in_use(db) -> None:
         )
         logger.info("예약 %d → IN_USE 전환 (서버 %d)", reservation.id, reservation.server_id)
 
+    return len(reservations)
 
-async def _expire_reservations(db) -> None:
-    """end_time이 경과한 RESERVED/IN_USE 예약을 EXPIRED로 전환하고 서버를 반환한다."""
+
+async def _expire_reservations(db) -> int:
+    """end_time이 경과한 RESERVED/IN_USE 예약을 EXPIRED로 전환하고 서버를 반환한다(전이 건수 반환)."""
     now = datetime.now(tz=timezone.utc)
 
     rows = await db.execute(
@@ -83,3 +88,5 @@ async def _expire_reservations(db) -> None:
             quota.used -= 1
 
         logger.info("예약 %d → EXPIRED (서버 %d 반환)", reservation.id, reservation.server_id)
+
+    return len(reservations)

@@ -21,6 +21,7 @@ from app.database import SessionLocal
 from app.models import Forecast, Notification, Reservation, Server, ServerMetric, User
 from app.models.enums import ForecastMetric, MetricStatus, UserRole
 from app.services.forecast import InsufficientHistoryError, forecast_series
+from app.services.scheduler_log import add_scheduler_log
 
 logger = logging.getLogger(__name__)
 
@@ -45,10 +46,13 @@ async def generate_forecasts(*, session_factory: async_sessionmaker = SessionLoc
             servers = (
                 await db.execute(select(Server).where(Server.deleted_at.is_(None)))
             ).scalars().all()
+            stored = 0
             for server in servers:
                 for metric, attr in _METRIC_ATTR.items():
-                    await _forecast_server_metric(db, server.id, metric, attr, now)
-            await _forecast_reservation_demand(db, now)
+                    stored += await _forecast_server_metric(db, server.id, metric, attr, now)
+            stored += await _forecast_reservation_demand(db, now)
+            # 대시보드(F21)용 실행 이력: 이번에 저장한 예측 수를 처리량으로 남긴다.
+            add_scheduler_log(db, "UC22", stored)
             await db.commit()
         except Exception:
             await db.rollback()
@@ -57,8 +61,11 @@ async def generate_forecasts(*, session_factory: async_sessionmaker = SessionLoc
 
 async def _forecast_server_metric(
     db: AsyncSession, server_id: int, metric: ForecastMetric, attr: str, now: datetime
-) -> None:
-    """한 서버·메트릭의 사용률을 예측해 저장하고, 임박 포화면 ADM 에게 알린다."""
+) -> int:
+    """한 서버·메트릭의 사용률을 예측해 저장하고, 임박 포화면 ADM 에게 알린다.
+
+    저장에 성공하면 1, 표본 부족·적합 실패로 건너뛰면 0 을 반환한다(처리량 집계용).
+    """
     rows = (
         await db.execute(
             select(ServerMetric.collected_at, getattr(ServerMetric, attr))
@@ -74,7 +81,7 @@ async def _forecast_server_metric(
 
     series = _to_hourly_series(rows)
     if series is None:
-        return  # 표본이 거의 없으면 시계열을 만들지 않는다.
+        return 0  # 표본이 거의 없으면 시계열을 만들지 않는다.
 
     # 한 서버·메트릭의 적합 실패(표본 부족·수치 발산·특이행렬)가 전체 잡을 멈추면
     # 안 되므로, 이 단위에서 잡아 경고만 남기고 건너뛴다. 다른 서버는 계속 예측한다.
@@ -82,7 +89,7 @@ async def _forecast_server_metric(
         result = forecast_series(series)
     except (InsufficientHistoryError, ValueError, np.linalg.LinAlgError) as error:
         logger.warning("서버 %s 의 %s 예측 건너뜀: %s", server_id, metric.value, error)
-        return
+        return 0
 
     saturation_at = _parse_iso(result.saturation_at)
     db.add(Forecast(
@@ -95,12 +102,14 @@ async def _forecast_server_metric(
 
     if saturation_at is not None and saturation_at - now <= _NEAR_SATURATION:
         await _notify_admins_of_saturation(db, server_id, metric.value, saturation_at)
+    return 1
 
 
-async def _forecast_reservation_demand(db: AsyncSession, now: datetime) -> None:
+async def _forecast_reservation_demand(db: AsyncSession, now: datetime) -> int:
     """풀 전체 예약 생성 추이를 예측해 server_id=NULL 로 저장한다.
 
     예약 수요에는 사용률 포화 임계가 의미 없으므로 saturation_at 은 항상 NULL 로 둔다.
+    저장에 성공하면 1, 표본 부족·적합 실패로 건너뛰면 0 을 반환한다(처리량 집계용).
     """
     rows = (
         await db.execute(
@@ -112,14 +121,14 @@ async def _forecast_reservation_demand(db: AsyncSession, now: datetime) -> None:
 
     series = _to_hourly_count_series(rows, now)
     if series is None:
-        return
+        return 0
 
     # 서버 메트릭과 같은 이유로 수요 예측 실패도 잡 전체를 멈추지 않게 격리한다.
     try:
         result = forecast_series(series)
     except (InsufficientHistoryError, ValueError, np.linalg.LinAlgError) as error:
         logger.warning("예약 수요 예측 건너뜀: %s", error)
-        return
+        return 0
 
     db.add(Forecast(
         server_id=None,
@@ -128,6 +137,7 @@ async def _forecast_reservation_demand(db: AsyncSession, now: datetime) -> None:
         saturation_at=None,  # 예약 수요는 포화 개념이 없다.
         confidence=result.confidence,
     ))
+    return 1
 
 
 def _to_hourly_series(rows: list) -> pd.Series | None:
