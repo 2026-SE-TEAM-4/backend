@@ -30,4 +30,6 @@ def test_register_jobs_registers_all_expected_jobs():
         "forecast": timedelta(minutes=60),
         "incident_summary": timedelta(minutes=5),
         "failure_prediction": timedelta(minutes=10),
+        "idle_reclaim": timedelta(minutes=1),
+        "maintenance_transition": timedelta(minutes=1),
     }
