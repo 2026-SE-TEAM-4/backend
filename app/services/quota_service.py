@@ -6,15 +6,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Quota, Team, User
 from app.models.enums import UserRole
-from app.schemas.quota import QuotaUpdate
+from app.schemas.quota import QuotaResponse, QuotaUpdate
 
 
 async def list_team_quotas(
     team_id: int, current_user: User, db: AsyncSession
-) -> list[Quota]:
+) -> list[QuotaResponse]:
     """팀원별 Quota 조회 [UC10].
 
     MGR은 본인 팀만, ADM은 모든 팀 조회 가능. STU는 403.
+    표에 사용자 이름과 낙관적 잠금 version 을 함께 노출한다(조정 화면에서 필요).
     """
     if current_user.role == UserRole.STU:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "권한이 없습니다.")
@@ -28,10 +29,26 @@ async def list_team_quotas(
     if team is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "팀을 찾을 수 없습니다.")
 
-    result = await db.execute(
-        select(Quota).where(Quota.team_id == team_id)
-    )
-    return list(result.scalars().all())
+    rows = (
+        await db.execute(
+            select(Quota, User.name)
+            .join(User, User.id == Quota.user_id)
+            .where(Quota.team_id == team_id)
+            .order_by(User.name)
+        )
+    ).all()
+    return [
+        QuotaResponse(
+            id=q.id,
+            user_id=q.user_id,
+            user_name=name,
+            team_id=q.team_id,
+            limit=q.limit,
+            used=q.used,
+            version=q.version,
+        )
+        for q, name in rows
+    ]
 
 
 async def update_quota(

@@ -127,6 +127,19 @@ async def test_admin_creates_maintenance(client):
 
 # --- Quota 조정(F13) ---
 
+async def test_list_team_quotas_includes_name_and_version(client, seed_session):
+    token = _auth(await _register_and_login(client, email="mgr-ql@b.com", role="MGR"))
+    user_id = (await client.get("/auth/me", headers=token)).json()["id"]
+    async with seed_session() as db:
+        db.add(Quota(id=110, user_id=user_id, team_id=1, limit=4, used=2, version=3))
+        await db.commit()
+    res = await client.get("/teams/1/quotas", headers=token)
+    assert res.status_code == 200
+    row = next(q for q in res.json() if q["id"] == 110)
+    assert row["version"] == 3
+    assert isinstance(row["user_name"], str) and row["user_name"]
+
+
 async def test_manager_updates_team_quota(client, seed_session):
     token = _auth(await _register_and_login(client, email="mgr-q@b.com", role="MGR"))
     me = await client.get("/auth/me", headers=token)

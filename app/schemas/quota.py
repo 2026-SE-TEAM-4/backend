@@ -8,9 +8,11 @@ class QuotaResponse(BaseModel):
 
     id: int
     user_id: int
+    user_name: str
     team_id: int
     limit: int
     used: int
+    version: int
 
 
 class QuotaUpdate(BaseModel):
