@@ -48,3 +48,12 @@ class MetricStatus(str, Enum):
     OK = "OK"
     MISSING = "MISSING"
     NA = "NA"
+
+
+class MetricType(str, Enum):
+    """이상탐지가 다루는 메트릭 종류(UC18). AnomalyRecord.metric 값."""
+
+    CPU = "CPU"
+    MEM = "MEM"
+    NET = "NET"
+    GPU = "GPU"

@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import BigInteger, DateTime, Float, ForeignKey, func
+from sqlalchemy import BigInteger, DateTime, Float, ForeignKey, String, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -13,6 +13,8 @@ class AnomalyRecord(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     server_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("server.id"))
+    # 어떤 메트릭이 이탈했는지(MetricType: CPU/MEM/NET/GPU). 유형별 묶기·설명의 기준.
+    metric: Mapped[str] = mapped_column(String(10))
     current_value: Mapped[float] = mapped_column(Float)
     mean: Mapped[float] = mapped_column(Float)
     stddev: Mapped[float] = mapped_column(Float)
