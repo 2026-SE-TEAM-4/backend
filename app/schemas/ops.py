@@ -101,3 +101,61 @@ class IncidentSummaryResponse(BaseModel):
     situation: str
     root_causes: list[dict] = Field(serialization_alias="rootCauses")
     recommendations: list[dict]
+
+
+# --- 운영 대시보드·가용성(UC21, F21/F22) ---
+# 위 AIOps 스키마는 필드마다 serialization_alias 를 적지만, 대시보드 쪽은 필드가 많아
+# alias_generator(snake -> camel)로 한 번에 camelCase 로 노출한다.
+
+
+def _to_camel(value: str) -> str:
+    parts = value.split("_")
+    return parts[0] + "".join(part.capitalize() for part in parts[1:])
+
+
+class _CamelSchema(BaseModel):
+    model_config = ConfigDict(alias_generator=_to_camel, populate_by_name=True)
+
+
+class DashboardSchedulerItem(_CamelSchema):
+    uc_id: str
+    last_run: datetime | None
+    success: bool
+    processed: int
+
+
+class DashboardMetrics(_CamelSchema):
+    success_rate: float
+    missing: list[str]
+
+
+class DashboardAutoActions(_CamelSchema):
+    reclaimed: int
+    expired: int
+    auto_rejected: int
+
+
+class DashboardHealth(_CamelSchema):
+    normal: int = Field(serialization_alias="정상")
+    caution: int = Field(serialization_alias="주의")
+    danger: int = Field(serialization_alias="위험")
+
+
+class OpsDashboardResponse(_CamelSchema):
+    scheduler: list[DashboardSchedulerItem]
+    metrics: DashboardMetrics
+    auto_actions: DashboardAutoActions
+    health: DashboardHealth
+
+
+class ServerAvailability(_CamelSchema):
+    id: int
+    uptime: float
+    mtbf: float | None
+    mttr: float | None
+    risk_badge: bool
+
+
+class AvailabilityResponse(_CamelSchema):
+    servers: list[ServerAvailability]
+    system_availability: float

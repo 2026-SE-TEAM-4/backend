@@ -1,19 +1,36 @@
-"""서버 도메인 API 라우터(UC23). 장애 예측 잡이 저장한 위험·이력을 읽기 전용으로 조회한다.
+"""서버 도메인 API 라우터.
 
-무거운 추세·위험 산출은 스케줄러 컨테이너의 잡이 돌고, 여기서는 저장된 결과만 읽는다.
-추세(trend)는 저장된 이력의 기울기로 다시 계산해 노출한다. 권한은 운영 관리자(MGR/ADM)로
-제한한다(ops.py 와 동일 패턴).
+두 갈래를 한 라우터로 묶는다.
+- 서버 관리 CRUD·조회(F01·F02·F08·F14·F15·F16): 목록/상세/대안/등록/삭제/점검등록.
+- 건강·위험 추세(UC23): 장애 예측 잡이 저장한 결과를 읽기 전용으로 조회.
+
+인증은 시스템 공통 JWT 의존성(app/core/deps)을 쓴다. 조회는 로그인 사용자면 되고,
+생성·삭제·점검 등록은 서버 관리자(ADM)로 제한한다.
 """
 
 from datetime import datetime, timedelta, timezone
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import get_db, require_role
+from app.core.deps import get_current_user, get_db, require_role
+from app.core.exceptions import ConflictError, NotFoundError
 from app.models import AnomalyRecord, Server, ServerHealthHistory, User
 from app.schemas.ops import HealthTrendPoint, HealthTrendResponse
+from app.schemas.servers import (
+    MaintenanceCreate,
+    MaintenanceCreateResponse,
+    ServerAlternativeResponse,
+    ServerCreate,
+    ServerCreateResponse,
+    ServerDeleteResponse,
+    ServerDetailResponse,
+    ServerListResponse,
+    ServerSort,
+)
+from app.services import servers as server_service
 from app.services.failure_prediction import classify_trend, ewma_slope, risk_drivers
 
 router = APIRouter(prefix="/servers", tags=["servers"])
@@ -21,6 +38,86 @@ router = APIRouter(prefix="/servers", tags=["servers"])
 # 추세·이력을 보는 과거 구간과 이상 빈도 윈도우(잡과 같은 기준).
 _HISTORY_WINDOW = timedelta(days=7)
 _ANOMALY_WINDOW = timedelta(hours=24)
+
+
+def _raise_api_error(error: Exception) -> None:
+    """서비스 예외를 HTTP 상태로 바꾼다."""
+    if isinstance(error, NotFoundError):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(error)) from error
+    if isinstance(error, ConflictError):
+        raise HTTPException(status.HTTP_409_CONFLICT, str(error)) from error
+    raise error
+
+
+@router.post("", response_model=ServerCreateResponse, status_code=status.HTTP_201_CREATED)
+async def create_server(
+    data: ServerCreate,
+    _user: User = Depends(require_role("ADM")),
+    db: AsyncSession = Depends(get_db),
+) -> ServerCreateResponse:
+    """서버 등록 [UC11]. 이름·IP 중복 시 409."""
+    try:
+        return await server_service.create_server(db, data)
+    except ConflictError as error:
+        _raise_api_error(error)
+        raise
+
+
+@router.get("", response_model=ServerListResponse)
+async def list_servers(
+    _user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    status_value: Annotated[str | None, Query(alias="status")] = None,
+    group_name: Annotated[str | None, Query(alias="group")] = None,
+    sort: Annotated[ServerSort, Query()] = "id",
+    order: Annotated[str, Query(pattern="^(asc|desc)$")] = "asc",
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> ServerListResponse:
+    """서버 현황 조회 [UC01]. 상태·그룹 필터, 정렬, 페이지네이션.
+
+    공유 풀이라 모든 로그인 사용자가 전체 서버를 본다. 점유자(occupant)는 권한에 따라
+    실명(ADM/MGR) 또는 팀 코드(STU)로 노출한다.
+    """
+    return await server_service.list_servers(
+        session=db,
+        status=status_value,
+        group_name=group_name,
+        user_role=_user.role,
+        scope_group_name=None,
+        sort=sort,
+        order=order,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.get("/alternatives", response_model=ServerAlternativeResponse)
+async def list_alternatives(
+    server_id: Annotated[int, Query(alias="serverId")],
+    _user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ServerAlternativeResponse:
+    """대안 서버 조회 [UC03-d]. 유사 사양 AVAILABLE 서버 최대 5건."""
+    try:
+        return await server_service.list_alternative_servers(db, server_id)
+    except NotFoundError as error:
+        _raise_api_error(error)
+        raise
+
+
+@router.get("/{server_id}", response_model=ServerDetailResponse)
+async def get_server(
+    server_id: int,
+    _user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ServerDetailResponse:
+    """서버 상세 조회 [UC01]. 없으면 404."""
+    try:
+        return await server_service.get_server(db, server_id)
+    except NotFoundError as error:
+        _raise_api_error(error)
+        raise
 
 
 @router.get("/{server_id}/health-trend", response_model=HealthTrendResponse)
@@ -33,12 +130,9 @@ async def get_health_trend(
 
     잡이 저장한 risk_score·eta_to_risk 와 최근 7일 건강점수 이력을 돌려준다. trend 는
     이력 기울기로 다시 계산하고, drivers 는 기울기·이상빈도·현재건강으로 근거를 만든다.
-
-    trend·drivers 는 요청 시점의 저장된 이력으로 즉석 계산하고, riskScore·etaToRisk 는
-    마지막 장애 예측 잡이 저장한 스냅샷이다(둘은 서로 다른 시점의 값일 수 있다).
     """
     server = await db.get(Server, server_id)
-    if server is None:
+    if server is None or server.deleted_at is not None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "서버를 찾을 수 없습니다.")
 
     now = datetime.now(tz=timezone.utc)
@@ -60,6 +154,39 @@ async def get_health_trend(
         history=[HealthTrendPoint(ts=ts, health_score=score) for ts, score in history_rows],
         drivers=drivers,
     )
+
+
+@router.delete("/{server_id}", response_model=ServerDeleteResponse)
+async def delete_server(
+    server_id: int,
+    _user: User = Depends(require_role("ADM")),
+    db: AsyncSession = Depends(get_db),
+) -> ServerDeleteResponse:
+    """서버 삭제 [UC12]. soft delete. 활성 예약이 있으면 409."""
+    try:
+        return await server_service.soft_delete_server(db, server_id)
+    except (ConflictError, NotFoundError) as error:
+        _raise_api_error(error)
+        raise
+
+
+@router.post(
+    "/{server_id}/maintenances",
+    response_model=MaintenanceCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_maintenance(
+    server_id: int,
+    data: MaintenanceCreate,
+    user: User = Depends(require_role("ADM")),
+    db: AsyncSession = Depends(get_db),
+) -> MaintenanceCreateResponse:
+    """점검 스케줄 등록 [UC13]. 예약과 겹치면 409(force=true 면 강행)."""
+    try:
+        return await server_service.create_maintenance(db, server_id, data, user.id)
+    except (ConflictError, NotFoundError) as error:
+        _raise_api_error(error)
+        raise
 
 
 async def _health_history(

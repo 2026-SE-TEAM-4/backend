@@ -12,9 +12,11 @@ from app.api import (
     auth,
     notifications,
     ops,
+    quotas,
     reservations,
     servers,
     teams,
+    users,
     ws,
 )
 
@@ -39,6 +41,8 @@ app.include_router(teams.router)
 app.include_router(ws.router)
 app.include_router(ops.router)
 app.include_router(servers.router)
+app.include_router(quotas.router)
+app.include_router(users.router)
 
 
 @app.get("/health")

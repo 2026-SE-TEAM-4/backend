@@ -1,7 +1,11 @@
-"""운영(ops) API 라우터(UC24·UC22). 잡이 저장한 결과를 읽기 전용으로 조회한다.
+"""운영(ops) API 라우터.
 
-무거운 상관·예측 로직은 스케줄러 컨테이너의 잡이 돌고, 여기서는 저장된 결과만 읽는다.
-권한은 운영 관리자(MGR/ADM)로 제한한다.
+두 갈래를 한 라우터로 묶는다.
+- AIOps 조회(UC24·UC22·UC25): 인시던트 목록/상세/LLM 요약, 용량·수요 예측.
+- 운영 대시보드·가용성(UC21, F21/F22): 스케줄러·메트릭·자동조치·건강 요약, 업타임/MTBF/MTTR.
+
+잡이 저장한 결과를 읽기 전용으로 조회한다. 대시보드·가용성은 서버 관리자(ADM),
+AIOps 조회는 운영 관리자(MGR/ADM)로 제한한다.
 """
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -12,14 +16,35 @@ from app.core.deps import get_db, require_role
 from app.models import AnomalyRecord, Forecast, Incident, IncidentSummary, User
 from app.schemas.ops import (
     AnomalyResponse,
+    AvailabilityResponse,
     ForecastResponse,
     IncidentDetailResponse,
     IncidentListResponse,
     IncidentResponse,
     IncidentSummaryResponse,
+    OpsDashboardResponse,
 )
+from app.services import ops_dashboard
 
 router = APIRouter(prefix="/ops", tags=["ops"])
+
+
+@router.get("/dashboard", response_model=OpsDashboardResponse)
+async def get_dashboard(
+    _user: User = Depends(require_role("ADM")),
+    db: AsyncSession = Depends(get_db),
+) -> OpsDashboardResponse:
+    """운영 대시보드 조회 [UC21]. 스케줄러·메트릭·자동조치·건강 5개 섹션 집계."""
+    return await ops_dashboard.get_dashboard(db)
+
+
+@router.get("/availability", response_model=AvailabilityResponse)
+async def get_availability(
+    _user: User = Depends(require_role("ADM")),
+    db: AsyncSession = Depends(get_db),
+) -> AvailabilityResponse:
+    """가용성 현황 조회 [UC21]. 서버별 업타임·MTBF·MTTR·위험뱃지와 시스템 가용성."""
+    return await ops_dashboard.get_availability(db)
 
 
 @router.get("/incidents", response_model=IncidentListResponse)

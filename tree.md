@@ -17,8 +17,12 @@ backend/
 │   ├── api/                   # 도메인별 라우터 (1 도메인 = 1 파일 권장)
 │   │   ├── auth.py            # 회원가입 / 로그인
 │   │   ├── approval_requests.py
-│   │   ├── notifications.py
+│   │   ├── notifications.py   # 알림 목록 / 읽음 처리(F18)
 │   │   ├── reservations.py
+│   │   ├── servers.py         # 서버 CRUD·대안·점검(F01·02·08·14~16) + 건강추세(UC23)
+│   │   ├── ops.py             # 대시보드·가용성(F21·22) + 인시던트·예측·요약(UC22·24·25)
+│   │   ├── quotas.py          # 팀원 Quota 조정(F13)
+│   │   ├── users.py           # 계정 잠금 해제(F20)
 │   │   ├── teams.py
 │   │   └── ws.py             # WebSocket (실시간 알림 등)
 │   ├── models/                # SQLAlchemy ORM 모델
@@ -41,19 +45,26 @@ backend/
 │   │   ├── auth.py
 │   │   ├── approval_request.py
 │   │   ├── notification.py
+│   │   ├── ops.py             # AIOps + 대시보드·가용성 스키마
 │   │   ├── quota.py
-│   │   └── reservation.py
+│   │   ├── reservation.py
+│   │   ├── servers.py         # 서버 CRUD·점검 스키마
+│   │   └── users.py           # 계정 잠금 해제 스키마
 │   ├── services/              # 비즈니스 로직 (라우터에서 호출)
 │   │   ├── auth_service.py
 │   │   ├── approval_service.py
 │   │   ├── notification_service.py
+│   │   ├── ops_dashboard.py   # 대시보드·가용성 집계(F21·22)
 │   │   ├── quota_service.py
-│   │   └── reservation_service.py
+│   │   ├── reservation_service.py
+│   │   ├── servers.py         # 서버 관리 로직
+│   │   └── users.py           # 계정 잠금 해제 로직
 │   ├── jobs/                  # APScheduler 잡 구현 (scheduler.py 가 등록)
 │   │   ├── approval_jobs.py
 │   │   └── reservation_jobs.py
 │   └── core/                  # 보안·예외·공통 의존성 (cross-cutting)
-│       ├── deps.py           # FastAPI 의존성
+│       ├── deps.py           # FastAPI 의존성 (get_db / get_current_user / require_role)
+│       ├── exceptions.py     # 서비스 계층 예외 (NotFound / Conflict 등)
 │       ├── security.py       # 비밀번호 해시 / JWT 등
 │       └── redis.py          # Redis 클라이언트
 ├── alembic/                   # DB 마이그레이션
