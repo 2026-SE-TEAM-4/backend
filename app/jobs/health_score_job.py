@@ -20,6 +20,7 @@ from app.database import SessionLocal
 from app.models import AnomalyRecord, Server, ServerHealthHistory, ServerMetric
 from app.models.enums import MetricStatus
 from app.services.health import compute_health_score
+from app.services.scheduler_log import add_scheduler_log
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +36,7 @@ async def compute_health_scores(*, session_factory: async_sessionmaker = Session
             servers = (
                 await db.execute(select(Server).where(Server.deleted_at.is_(None)))
             ).scalars().all()
+            scored = 0
             for server in servers:
                 score = await _score_for_server(db, server.id, now)
                 if score is None:
@@ -46,6 +48,9 @@ async def compute_health_scores(*, session_factory: async_sessionmaker = Session
                 # 추세(7일 기울기) 계산을 위해 시점별 점수 이력도 함께 남긴다(UC23).
                 # Server.health_score 는 최신값만 들고 있어 추세를 낼 수 없기 때문이다.
                 db.add(ServerHealthHistory(server_id=server.id, score=score))
+                scored += 1
+            # 대시보드(F21)용 실행 이력: 이번에 점수를 산출한 서버 수를 처리량으로 남긴다.
+            add_scheduler_log(db, "UC19", scored)
             await db.commit()
         except Exception:
             await db.rollback()

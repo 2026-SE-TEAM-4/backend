@@ -12,6 +12,7 @@ from sqlalchemy import select
 from app.database import SessionLocal
 from app.models import ApprovalRequest
 from app.models.enums import ApprovalStatus
+from app.services.scheduler_log import add_scheduler_log
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +40,8 @@ async def auto_reject_timed_out_requests() -> None:
                 req.decided_by = "SYSTEM"
                 logger.info("승인 요청 %d → AUTO_REJECTED (72시간 초과)", req.id)
 
+            # 대시보드(F21)용 실행 이력: 이번에 자동 거절한 요청 수를 처리량으로 남긴다.
+            add_scheduler_log(db, "UC17", len(requests))
             await db.commit()
         except Exception:
             await db.rollback()

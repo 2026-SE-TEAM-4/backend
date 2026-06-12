@@ -32,6 +32,7 @@ from app.services.failure_prediction import (
     ewma_slope,
     risk_drivers,
 )
+from app.services.scheduler_log import add_scheduler_log
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +61,8 @@ async def predict_failures(*, session_factory: async_sessionmaker = SessionLocal
             ).scalars().all()
             for server in servers:
                 await _predict_one_server(db, server, now, admins)
+            # 대시보드(F21)용 실행 이력: 이번에 위험도를 산출한 서버 수를 처리량으로 남긴다.
+            add_scheduler_log(db, "UC23", len(servers))
             await db.commit()
         except Exception:
             await db.rollback()
