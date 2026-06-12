@@ -35,3 +35,16 @@ def test_many_anomalies_escalates_to_critical():
     # 한 그룹에 이상이 다수 누적되면 CRITICAL.
     severity = compute_severity(anomaly_count=8, server_count=1, max_deviation=2.5)
     assert severity == IncidentSeverity.CRITICAL.value
+
+
+def test_anomaly_count_just_below_warning_stays_info():
+    # WARNING 임계(3) 바로 아래(2)는 아직 INFO 다(경계 미만 확인).
+    severity = compute_severity(anomaly_count=2, server_count=1, max_deviation=2.5)
+    assert severity == IncidentSeverity.INFO.value
+
+
+def test_deviation_just_below_critical_does_not_escalate():
+    # CRITICAL 편차 임계(5.0) 바로 아래(4.9)는 CRITICAL 이 아니다.
+    # 단, WARNING 편차 임계(4.0)는 넘으므로 WARNING 으로 남는다.
+    severity = compute_severity(anomaly_count=1, server_count=1, max_deviation=4.9)
+    assert severity == IncidentSeverity.WARNING.value

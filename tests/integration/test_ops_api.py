@@ -74,6 +74,17 @@ async def test_list_incidents_forbidden_for_student(client):
     assert response.status_code == 403
 
 
+async def test_noise_reduction_rate_is_zero_when_no_anomalies(client):
+    # 이상이 하나도 없으면 0 으로 나눌 수 없으므로 감소율은 0.0 이다(0 나눗셈 가드).
+    token = await _register_and_login(client, email="adm0@b.com", role="ADM")
+    response = await client.get("/ops/incidents", headers={"Authorization": f"Bearer {token}"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["incidents"] == []
+    assert body["noiseReductionRate"] == 0.0
+
+
 async def test_get_incident_returns_linked_anomalies(client, seed_session):
     async with seed_session() as db:
         db.add(_server(1))

@@ -78,6 +78,9 @@ async def _correlate_group(
     db: AsyncSession, server_ids: set[int], anomalies: list[AnomalyRecord]
 ) -> None:
     """그룹을 기존 OPEN 인시던트에 부착하거나 새 인시던트로 만든다."""
+    # 읽고-나서-생성 사이에 DB 수준의 유일성 보장이 없어, 잡이 동시에 두 번 돌면
+    # 인시던트가 중복 생성될 수 있다. 잡은 스케줄러 컨테이너가 단독 소유한다
+    # (scheduling.py 참고)고 전제하므로 단일 인스턴스 가정이 유효하다.
     incident = await _find_open_incident_sharing_server(db, server_ids)
     is_new = incident is None
     if is_new:
@@ -143,6 +146,8 @@ async def _recompute_severity(db: AsyncSession, incident_id: int) -> str:
 
 async def _notify_admins(db: AsyncSession, incident: Incident) -> None:
     """ADM 사용자 각각에게 인시던트 알림 1건씩 만든다(인시던트당 1회)."""
+    # 기존 인시던트에 이상이 더 부착될 때는 의도적으로 재알림하지 않는다
+    # (노이즈 감소가 목적이라 인시던트당 알림은 한 번뿐이다).
     admins = (
         await db.execute(select(User).where(User.role == UserRole.ADM.value))
     ).scalars().all()

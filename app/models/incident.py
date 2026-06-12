@@ -23,6 +23,6 @@ class Incident(Base):
     status: Mapped[str] = mapped_column(String(10), default=IncidentStatus.OPEN.value)
     anomaly_count: Mapped[int] = mapped_column(Integer, default=0)
     # 관련 서버 id 목록. JSONB 리스트로 둔다(서버 수가 가변이라 컬럼화하지 않는다).
-    server_ids: Mapped[list] = mapped_column(JSONB)
+    server_ids: Mapped[list[int]] = mapped_column(JSONB)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

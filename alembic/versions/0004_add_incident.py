@@ -29,6 +29,16 @@ def _has_column(table: str, column: str) -> bool:
     return any(col["name"] == column for col in inspector.get_columns(table))
 
 
+def _has_index(table: str, index: str) -> bool:
+    inspector = sa.inspect(op.get_bind())
+    return any(idx["name"] == index for idx in inspector.get_indexes(table))
+
+
+# Postgres 는 FK 컬럼을 자동 인덱싱하지 않아 상관/조회/자동종료가 매번 풀스캔한다.
+# 인덱스를 명시한다(모델의 index=True 와 같은 이름).
+_INCIDENT_ID_INDEX = "ix_anomaly_record_incident_id"
+
+
 def upgrade() -> None:
     if not _has_table("incident"):
         op.create_table(
@@ -57,6 +67,12 @@ def upgrade() -> None:
             ["id"],
         )
 
+    # 컬럼 존재 여부와 별개로 인덱스도 멱등하게 더한다(컬럼 가드와 같은 방식).
+    if _has_column("anomaly_record", "incident_id") and not _has_index(
+        "anomaly_record", _INCIDENT_ID_INDEX
+    ):
+        op.create_index(_INCIDENT_ID_INDEX, "anomaly_record", ["incident_id"])
+
 
 def _incident_fk_name() -> str | None:
     """anomaly_record.incident_id 의 실제 FK 제약 이름을 찾는다(없으면 None).
@@ -74,6 +90,9 @@ def _incident_fk_name() -> str | None:
 
 def downgrade() -> None:
     if _has_column("anomaly_record", "incident_id"):
+        # 컬럼을 지우기 전에 인덱스부터 내린다(인덱스가 컬럼에 의존).
+        if _has_index("anomaly_record", _INCIDENT_ID_INDEX):
+            op.drop_index(_INCIDENT_ID_INDEX, table_name="anomaly_record")
         fk_name = _incident_fk_name()
         if fk_name is not None:
             op.drop_constraint(fk_name, "anomaly_record", type_="foreignkey")

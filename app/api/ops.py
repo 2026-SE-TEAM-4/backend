@@ -76,4 +76,6 @@ async def _noise_reduction_rate(db: AsyncSession) -> float:
     if total_anomalies == 0:
         return 0.0
     total_incidents = await db.scalar(select(func.count()).select_from(Incident)) or 0
-    return 1 - (total_incidents / total_anomalies)
+    # 인시던트 수가 이상 수보다 많으면(아직 이상이 부착되지 않은 인시던트 등) 값이
+    # 음수가 될 수 있다. 감소율은 0 미만이 의미 없으므로 0 으로 바닥을 둔다.
+    return max(0.0, 1 - (total_incidents / total_anomalies))

@@ -131,3 +131,98 @@ async def test_new_incident_notifies_each_adm_once(factory):
     assert len(notifications) == 1
     assert notifications[0].user_id == 1
     assert notifications[0].type == "INCIDENT"
+
+
+async def test_groupless_servers_do_not_merge_but_same_server_groups(factory):
+    # group_name 이 없는 서버는 server:{id} 단위로 본다. 서로 다른 두 그룹리스
+    # 서버(1, 2)는 한 인시던트로 합쳐지지 않고, 같은 그룹리스 서버(1)의 이상끼리는 묶인다.
+    now = datetime.now(tz=timezone.utc)
+    async with factory() as db:
+        db.add_all([_server(1, group_name=None), _server(2, group_name=None)])
+        await db.flush()
+        db.add_all([
+            _anomaly(1, detected_at=now - timedelta(minutes=3)),
+            _anomaly(1, detected_at=now - timedelta(minutes=2)),  # 같은 서버 → 같은 인시던트
+            _anomaly(2, detected_at=now - timedelta(minutes=1)),  # 다른 그룹리스 서버 → 별도
+        ])
+        await db.commit()
+
+    await correlate_anomalies(session_factory=factory)
+
+    async with factory() as db:
+        incidents = (await db.execute(select(Incident))).scalars().all()
+    # 서버 1·2 가 합쳐지지 않아 인시던트는 2건.
+    assert len(incidents) == 2
+    by_server = {tuple(incident.server_ids): incident for incident in incidents}
+    assert (1,) in by_server and (2,) in by_server
+    # 같은 그룹리스 서버(1)의 이상 2건은 한 인시던트로 묶인다.
+    assert by_server[(1,)].anomaly_count == 2
+    assert by_server[(2,)].anomaly_count == 1
+
+
+async def test_attach_to_existing_incident_does_not_renotify(factory):
+    # 기존 OPEN 인시던트에 같은 서버 이상이 부착될 때는 재알림하지 않는다
+    # (노이즈 감소 목적상 인시던트당 알림은 한 번뿐). 알림 수가 1 로 유지되는지 본다.
+    now = datetime.now(tz=timezone.utc)
+    async with factory() as db:
+        db.add(Team(id=1, name="Lab", code="LAB", total_quota_limit=10))
+        db.add(User(id=1, name="adm", email="adm@b.com", role="ADM", team_id=1))
+        db.add(_server(1, group_name="lab"))
+        await db.flush()
+        db.add(_anomaly(1, detected_at=now - timedelta(minutes=3)))
+        await db.commit()
+
+    await correlate_anomalies(session_factory=factory)  # 인시던트 생성 + 알림 1건
+
+    async with factory() as db:
+        db.add(_anomaly(1, detected_at=now - timedelta(minutes=1)))  # 같은 서버 새 이상
+        await db.commit()
+
+    await correlate_anomalies(session_factory=factory)  # 부착(재알림 금지)
+
+    async with factory() as db:
+        notifications = (await db.execute(select(Notification))).scalars().all()
+        incidents = (await db.execute(select(Incident))).scalars().all()
+    assert len(incidents) == 1  # 신규 생성 없음
+    assert len(notifications) == 1  # 부착 시 알림이 추가되지 않음
+
+
+async def test_severity_escalates_when_more_anomalies_attach(factory):
+    # INFO/WARNING 으로 시작한 인시던트가 이상·서버가 더 부착되며 CRITICAL 로 오르는지
+    # 확인한다(_recompute_severity 의 DB 재계산 경로 검증). 첫 잡에서는 같은 그룹의
+    # 작은 편차 이상 1건 → WARNING 미만(INFO), 두 번째 잡에서 이상이 쌓여 CRITICAL.
+    now = datetime.now(tz=timezone.utc)
+
+    def _mild_anomaly(server_id: int, *, detected_at: datetime) -> AnomalyRecord:
+        # 편차 = |52-50|/10 = 0.2σ 로 작아 단독으로는 심각도를 올리지 않는다.
+        return AnomalyRecord(server_id=server_id, metric="CPU", current_value=52.0,
+                             mean=50.0, stddev=10.0, detected_at=detected_at)
+
+    async with factory() as db:
+        db.add(_server(1, group_name="lab"))
+        await db.flush()
+        db.add(_mild_anomaly(1, detected_at=now - timedelta(minutes=3)))
+        await db.commit()
+
+    await correlate_anomalies(session_factory=factory)  # 이상 1건 → INFO
+
+    async with factory() as db:
+        incident = (await db.execute(select(Incident))).scalars().one()
+        assert incident.severity == "INFO"
+
+    async with factory() as db:
+        # 같은 서버에 작은 편차 이상 4건을 더해 누적 5건 → CRITICAL 임계 도달.
+        db.add_all([
+            _mild_anomaly(1, detected_at=now - timedelta(minutes=2)),
+            _mild_anomaly(1, detected_at=now - timedelta(minutes=2)),
+            _mild_anomaly(1, detected_at=now - timedelta(minutes=1)),
+            _mild_anomaly(1, detected_at=now - timedelta(minutes=1)),
+        ])
+        await db.commit()
+
+    await correlate_anomalies(session_factory=factory)  # 누적 5건 → CRITICAL
+
+    async with factory() as db:
+        incident = (await db.execute(select(Incident))).scalars().one()
+    assert incident.anomaly_count == 5
+    assert incident.severity == "CRITICAL"
