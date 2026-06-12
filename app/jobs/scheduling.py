@@ -12,8 +12,10 @@ from app.jobs.approval_jobs import auto_reject_timed_out_requests
 from app.jobs.failure_prediction_job import predict_failures
 from app.jobs.forecast_job import generate_forecasts
 from app.jobs.health_score_job import compute_health_scores
+from app.jobs.idle_reclaim_job import reclaim_idle_servers
 from app.jobs.incident_correlation_job import correlate_anomalies
 from app.jobs.incident_summary_job import summarize_pending_incidents
+from app.jobs.maintenance_transition_job import transition_maintenance_schedules
 from app.jobs.metric_collection_job import collect_server_metrics
 from app.jobs.reservation_jobs import process_reservation_transitions
 
@@ -47,3 +49,9 @@ def register_jobs(scheduler: AsyncIOScheduler) -> None:
     # F32: 장애·건강 열화 예측(7일 추세 + 위험도, F28 직후)
     scheduler.add_job(predict_failures, "interval", minutes=10,
                       id="failure_prediction", replace_existing=True)
+    # F24: 유휴 서버 감지·자동 회수(경고 후 회수)
+    scheduler.add_job(reclaim_idle_servers, "interval", minutes=1,
+                      id="idle_reclaim", replace_existing=True)
+    # F30: 점검 스케줄 자동 상태 전환(MAINTENANCE/AVAILABLE)
+    scheduler.add_job(transition_maintenance_schedules, "interval", minutes=1,
+                      id="maintenance_transition", replace_existing=True)
