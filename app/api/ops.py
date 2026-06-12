@@ -1,6 +1,6 @@
-"""운영(ops) API 라우터(UC24). 상관 잡이 저장한 인시던트를 읽기 전용으로 조회한다.
+"""운영(ops) API 라우터(UC24·UC22). 잡이 저장한 결과를 읽기 전용으로 조회한다.
 
-무거운 상관 로직은 스케줄러 컨테이너의 잡이 돌고, 여기서는 저장된 결과만 읽는다.
+무거운 상관·예측 로직은 스케줄러 컨테이너의 잡이 돌고, 여기서는 저장된 결과만 읽는다.
 권한은 운영 관리자(MGR/ADM)로 제한한다.
 """
 
@@ -9,9 +9,10 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_db, require_role
-from app.models import AnomalyRecord, Incident, User
+from app.models import AnomalyRecord, Forecast, Incident, User
 from app.schemas.ops import (
     AnomalyResponse,
+    ForecastResponse,
     IncidentDetailResponse,
     IncidentListResponse,
     IncidentResponse,
@@ -68,6 +69,38 @@ async def get_incident(
         incident=IncidentResponse.model_validate(incident),
         anomalies=[AnomalyResponse.model_validate(anomaly) for anomaly in anomalies],
     )
+
+
+@router.get("/forecast", response_model=ForecastResponse)
+async def get_forecast(
+    metric: str,
+    serverId: int | None = None,
+    days: int | None = None,
+    _user: User = Depends(require_role("MGR", "ADM")),
+    db: AsyncSession = Depends(get_db),
+) -> ForecastResponse:
+    """서버·메트릭별 가장 최근 예측을 조회한다 [UC22]. 없으면 404.
+
+    serverId 가 없으면 풀 전체 예약 수요(RESERVATION_DEMAND) 예측을 가리킨다.
+    days 는 정보성 파라미터로, 예측은 잡이 저장한 구간(7일)을 그대로 돌려준다.
+    404 는 데이터 부족 등으로 아직 예측이 생성되지 않았음을 뜻한다.
+    """
+    query = (
+        select(Forecast)
+        .where(Forecast.metric == metric)
+        .order_by(Forecast.generated_at.desc())
+        .limit(1)
+    )
+    # server_id 는 nullable 이라 NULL 비교(is_)와 값 비교를 구분해야 한다.
+    if serverId is None:
+        query = query.where(Forecast.server_id.is_(None))
+    else:
+        query = query.where(Forecast.server_id == serverId)
+
+    forecast = await db.scalar(query)
+    if forecast is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "예측 결과를 찾을 수 없습니다.")
+    return ForecastResponse.model_validate(forecast)
 
 
 async def _noise_reduction_rate(db: AsyncSession) -> float:

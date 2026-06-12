@@ -9,6 +9,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from app.jobs.anomaly_detection_job import detect_anomalies
 from app.jobs.approval_jobs import auto_reject_timed_out_requests
+from app.jobs.forecast_job import generate_forecasts
 from app.jobs.health_score_job import compute_health_scores
 from app.jobs.incident_correlation_job import correlate_anomalies
 from app.jobs.metric_collection_job import collect_server_metrics
@@ -35,3 +36,6 @@ def register_jobs(scheduler: AsyncIOScheduler) -> None:
     # F33: 인시던트 상관(이상 묶기·노이즈 감소)
     scheduler.add_job(correlate_anomalies, "interval", minutes=5,
                       id="incident_correlation", replace_existing=True)
+    # F31: 용량·수요 예측(Holt-Winters, 7일)
+    scheduler.add_job(generate_forecasts, "interval", minutes=60,
+                      id="forecast", replace_existing=True)

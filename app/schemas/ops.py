@@ -1,4 +1,4 @@
-"""운영(ops) 도메인 응답 스키마(UC24). 응답은 camelCase 로 노출한다."""
+"""운영(ops) 도메인 응답 스키마(UC24·UC22). 응답은 camelCase 로 노출한다."""
 
 from datetime import datetime
 
@@ -45,3 +45,17 @@ class IncidentDetailResponse(BaseModel):
 
     incident: IncidentResponse
     anomalies: list[AnomalyResponse]
+
+
+class ForecastResponse(BaseModel):
+    """용량·수요 예측 결과(UC22). 가장 최근 저장본을 그대로 노출한다."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    server_id: int | None = Field(serialization_alias="serverId")
+    metric: str
+    generated_at: datetime = Field(serialization_alias="generatedAt")
+    saturation_at: datetime | None = Field(serialization_alias="saturationAt")
+    confidence: float
+    # 향후 시점별 예측점 목록 [{ts, yhat, lower, upper}]. JSONB 를 그대로 전달한다.
+    horizon: list[dict]

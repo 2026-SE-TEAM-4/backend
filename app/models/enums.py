@@ -72,3 +72,15 @@ class IncidentStatus(str, Enum):
 
     OPEN = "OPEN"
     RESOLVED = "RESOLVED"
+
+
+class ForecastMetric(str, Enum):
+    """용량·수요 예측이 다루는 대상(UC22). Forecast.metric 값.
+
+    CPU/MEM/GPU 는 서버별 사용률 예측, RESERVATION_DEMAND 는 풀 전체 예약 수요 예측이다.
+    """
+
+    CPU = "CPU"
+    MEM = "MEM"
+    GPU = "GPU"
+    RESERVATION_DEMAND = "RESERVATION_DEMAND"

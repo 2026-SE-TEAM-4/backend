@@ -12,7 +12,7 @@ import pytest_asyncio
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 import app.models  # noqa: F401  메타데이터 등록
-from app.models import AnomalyRecord, Incident, Server
+from app.models import AnomalyRecord, Forecast, Incident, Server
 
 
 def _server(server_id: int) -> Server:
@@ -115,3 +115,50 @@ async def test_get_incident_missing_returns_404(client):
         "/ops/incidents/999999", headers={"Authorization": f"Bearer {token}"}
     )
     assert response.status_code == 404
+
+
+def _forecast(server_id: int | None, metric: str) -> Forecast:
+    return Forecast(
+        server_id=server_id,
+        metric=metric,
+        horizon=[{"ts": "2026-06-13T00:00:00+00:00", "yhat": 80.0,
+                  "lower": 70.0, "upper": 90.0}],
+        saturation_at=None,
+        confidence=0.8,
+    )
+
+
+async def test_get_forecast_returns_stored_forecast_for_admin(client, seed_session):
+    async with seed_session() as db:
+        db.add(_server(1))
+        await db.flush()  # 서버 먼저 적재(예측의 FK 대상)
+        db.add(_forecast(1, "CPU"))
+        await db.commit()
+
+    token = await _register_and_login(client, email="adm-fc@b.com", role="ADM")
+    response = await client.get(
+        "/ops/forecast?serverId=1&metric=CPU", headers={"Authorization": f"Bearer {token}"}
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["serverId"] == 1
+    assert body["metric"] == "CPU"
+    assert body["confidence"] == 0.8
+    assert len(body["horizon"]) == 1
+
+
+async def test_get_forecast_missing_returns_404(client):
+    token = await _register_and_login(client, email="mgr-fc@b.com", role="MGR")
+    response = await client.get(
+        "/ops/forecast?serverId=999&metric=CPU", headers={"Authorization": f"Bearer {token}"}
+    )
+    assert response.status_code == 404
+
+
+async def test_get_forecast_forbidden_for_student(client):
+    token = await _register_and_login(client, email="stu-fc@b.com", role="STU")
+    response = await client.get(
+        "/ops/forecast?serverId=1&metric=CPU", headers={"Authorization": f"Bearer {token}"}
+    )
+    assert response.status_code == 403

@@ -17,6 +17,11 @@ dependencies = [
     "bcrypt>=4.2",
     # 메트릭 수집 잡이 서버풀 에이전트 /metrics 를 호출한다(스케줄러 컨테이너).
     "httpx>=0.27",
+    # 용량·수요 예측 잡(F31)이 시계열 리샘플·보간(pandas)과 Holt-Winters 적합
+    # (statsmodels, numpy 의존)에 쓴다. 스케줄러 컨테이너에서만 동작한다.
+    "numpy>=2.0",
+    "pandas>=2.2",
+    "statsmodels>=0.14",
 ]
 
 [dependency-groups]
