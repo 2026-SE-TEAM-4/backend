@@ -1,14 +1,35 @@
 """승인 요청 관련 API 엔드포인트."""
 
 from fastapi import APIRouter, Depends
+from fastapi import status as http_status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import get_db, require_role
+from app.core.deps import get_current_user, get_db, require_role
 from app.models import User
-from app.schemas.approval_request import ApprovalRequestResponse, DecisionRequest
+from app.schemas.approval_request import (
+    ApprovalRequestResponse,
+    CreateApprovalRequest,
+    CreateApprovalResponse,
+    DecisionRequest,
+)
 from app.services import approval_service
 
 router = APIRouter(prefix="/approval-requests", tags=["approval-requests"])
+
+
+@router.post("", response_model=CreateApprovalResponse, status_code=http_status.HTTP_201_CREATED)
+async def create_approval_request(
+    req: CreateApprovalRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> CreateApprovalResponse:
+    """Quota 초과 승인 요청 생성 [UC08 / F09].
+
+    요청자는 현재 사용자이며, 예약 생성(F04)과 동일하게 역할 제한이 없다(인증만 요구).
+    서버가 없거나 삭제됐으면 404, 동일 서버 PENDING 중복이면 409.
+    """
+    approval = await approval_service.create_approval_request(req, current_user, db)
+    return CreateApprovalResponse(approvalRequestId=approval.id, status="PENDING")
 
 
 @router.get("", response_model=list[ApprovalRequestResponse])
