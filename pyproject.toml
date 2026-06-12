@@ -15,13 +15,22 @@ dependencies = [
     "apscheduler>=3.10",
     "pyjwt>=2.9",
     "bcrypt>=4.2",
+    # 메트릭 수집 잡이 서버풀 에이전트 /metrics 를 호출한다(스케줄러 컨테이너).
+    "httpx>=0.27",
+    # 용량·수요 예측 잡(F31)이 시계열 리샘플·보간(pandas)과 Holt-Winters 적합
+    # (statsmodels, numpy 의존)에 쓴다. 스케줄러 컨테이너에서만 동작한다.
+    "numpy>=2.0",
+    "pandas>=2.2",
+    "statsmodels>=0.14",
+    # LLM 원인 요약 잡(F34)이 인시던트 요약을 만들 때 Gemini API 를 호출한다.
+    # 스케줄러 컨테이너에서만 동작하며, API 키가 없으면 잡은 건너뛴다.
+    "google-genai>=1.0",
 ]
 
 [dependency-groups]
 dev = [
     "pytest>=8.3",
     "pytest-asyncio>=0.24",
-    "httpx>=0.27",
     "testcontainers[postgres,redis]>=4.8",
 ]
 

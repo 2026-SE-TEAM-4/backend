@@ -34,6 +34,7 @@ backend/
 │   │   ├── notification.py
 │   │   ├── maintenance_schedule.py
 │   │   ├── anomaly_record.py
+│   │   ├── forecast.py        # 용량·수요 예측 결과(UC22)
 │   │   ├── audit_log.py
 │   │   └── scheduler_log.py
 │   ├── schemas/               # Pydantic 입출력 스키마

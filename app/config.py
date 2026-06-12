@@ -30,5 +30,11 @@ class Settings(BaseSettings):
     serverpool_host: str = "host.docker.internal"
     serverpool_base_port: int = 9101
 
+    # LLM 원인 요약 잡(F34/UC25). 키는 환경 변수로만 주입한다(절대 하드코딩 금지).
+    # 비어 있으면 요약 잡은 경고만 남기고 조용히 건너뛴다(키 없이도 앱은 정상 동작).
+    gemini_api_key: str = ""
+    # 인시던트당 1회 요약에 쓰는 비용 효율적 현행 Gemini 모델(필요 시 환경 변수로 교체).
+    gemini_model: str = "gemini-3.1-flash-lite"
+
 
 settings = Settings()

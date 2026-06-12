@@ -48,3 +48,50 @@ class MetricStatus(str, Enum):
     OK = "OK"
     MISSING = "MISSING"
     NA = "NA"
+
+
+class MetricType(str, Enum):
+    """이상탐지가 다루는 메트릭 종류(UC18). AnomalyRecord.metric 값."""
+
+    CPU = "CPU"
+    MEM = "MEM"
+    NET = "NET"
+    GPU = "GPU"
+
+
+class IncidentSeverity(str, Enum):
+    """인시던트 심각도(UC24). 이상 개수·서버 수·최고 편차로 산출."""
+
+    INFO = "INFO"
+    WARNING = "WARNING"
+    CRITICAL = "CRITICAL"
+
+
+class IncidentStatus(str, Enum):
+    """인시던트 생애주기(UC24). 새 이상이 한동안 없으면 RESOLVED 로 자동 종료."""
+
+    OPEN = "OPEN"
+    RESOLVED = "RESOLVED"
+
+
+class TrendDirection(str, Enum):
+    """건강점수 추세 방향(UC23). 7일 EWMA 기울기를 데드밴드로 분류한다.
+
+    IMPROVING(개선)·STABLE(안정)·DEGRADING(열화). 열화일 때만 위험·점검 권고가 의미 있다.
+    """
+
+    IMPROVING = "IMPROVING"
+    STABLE = "STABLE"
+    DEGRADING = "DEGRADING"
+
+
+class ForecastMetric(str, Enum):
+    """용량·수요 예측이 다루는 대상(UC22). Forecast.metric 값.
+
+    CPU/MEM/GPU 는 서버별 사용률 예측, RESERVATION_DEMAND 는 풀 전체 예약 수요 예측이다.
+    """
+
+    CPU = "CPU"
+    MEM = "MEM"
+    GPU = "GPU"
+    RESERVATION_DEMAND = "RESERVATION_DEMAND"
