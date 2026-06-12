@@ -7,6 +7,8 @@
 (라우터는 읽기 전용이라 잡 없이 데이터를 미리 넣어 조회만 검증한다).
 """
 
+from datetime import datetime, timedelta, timezone
+
 import pytest
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -117,15 +119,24 @@ async def test_get_incident_missing_returns_404(client):
     assert response.status_code == 404
 
 
-def _forecast(server_id: int | None, metric: str) -> Forecast:
-    return Forecast(
+def _forecast(
+    server_id: int | None,
+    metric: str,
+    *,
+    confidence: float = 0.8,
+    generated_at: datetime | None = None,
+) -> Forecast:
+    forecast = Forecast(
         server_id=server_id,
         metric=metric,
         horizon=[{"ts": "2026-06-13T00:00:00+00:00", "yhat": 80.0,
                   "lower": 70.0, "upper": 90.0}],
         saturation_at=None,
-        confidence=0.8,
+        confidence=confidence,
     )
+    if generated_at is not None:
+        forecast.generated_at = generated_at
+    return forecast
 
 
 async def test_get_forecast_returns_stored_forecast_for_admin(client, seed_session):
@@ -146,6 +157,27 @@ async def test_get_forecast_returns_stored_forecast_for_admin(client, seed_sessi
     assert body["metric"] == "CPU"
     assert body["confidence"] == 0.8
     assert len(body["horizon"]) == 1
+
+
+async def test_get_forecast_returns_most_recent_row(client, seed_session):
+    # 같은 서버·메트릭에 예측이 여러 건이면 generated_at 이 가장 최근인 것을 돌려준다.
+    now = datetime.now(tz=timezone.utc)
+    async with seed_session() as db:
+        db.add(_server(7))
+        await db.flush()  # 서버 먼저 적재(예측의 FK 대상)
+        db.add(_forecast(7, "CPU", confidence=0.3,
+                         generated_at=now - timedelta(hours=2)))
+        db.add(_forecast(7, "CPU", confidence=0.9, generated_at=now))
+        await db.commit()
+
+    token = await _register_and_login(client, email="adm-recent@b.com", role="ADM")
+    response = await client.get(
+        "/ops/forecast?serverId=7&metric=CPU", headers={"Authorization": f"Bearer {token}"}
+    )
+
+    assert response.status_code == 200
+    # 최신 행(confidence=0.9)이 반환되어야 한다(order_by generated_at desc limit 1).
+    assert response.json()["confidence"] == 0.9
 
 
 async def test_get_forecast_missing_returns_404(client):

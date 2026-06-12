@@ -7,6 +7,8 @@
 - 표본이 최소치 미만이면 명확한 ValueError 로 거른다(잡이 건너뛸 신호).
 """
 
+import math
+
 import pandas as pd
 import pytest
 
@@ -50,6 +52,24 @@ def test_short_series_raises_insufficient_history():
     # 최소 표본 미만이면 적합을 시도하지 않고 명확히 거른다.
     with pytest.raises(InsufficientHistoryError):
         forecast_series(_hourly_series([50.0] * (MIN_SAMPLES - 1)))
+
+
+def test_leading_nan_never_produces_nan_horizon():
+    # 선두에 결측(NaN)이 남은 시계열은 적합 전에 걸러져야 한다. NaN 을 그대로
+    # 적합하면 yhat 이 전부 NaN 이 되고 confidence=1.0 인 잘못된 행이 저장된다.
+    values = [float("nan")] + [50.0] * (MIN_SAMPLES * 2 - 1)
+    series = _hourly_series(values)
+
+    try:
+        result = forecast_series(series, horizon_hours=24, threshold=90.0)
+    except InsufficientHistoryError:
+        return  # fail-fast 로 거른 경우도 정답이다(NaN 행이 저장되지 않는다).
+
+    # 거르지 않고 처리했다면 결과 어디에도 NaN 이 없어야 하고 신뢰도는 1 이하여야 한다.
+    assert not any(math.isnan(point["yhat"]) for point in result.horizon)
+    assert not any(math.isnan(point["lower"]) for point in result.horizon)
+    assert not any(math.isnan(point["upper"]) for point in result.horizon)
+    assert 0.0 <= result.confidence <= 1.0
 
 
 def test_first_saturation_returns_first_crossing_ts():

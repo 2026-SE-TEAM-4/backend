@@ -13,10 +13,12 @@ import pytest_asyncio
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+import app.jobs.forecast_job as forecast_job
 import app.models  # noqa: F401  메타데이터 등록
 from app.database import Base
 from app.jobs.forecast_job import generate_forecasts
 from app.models import Forecast, Notification, Reservation, Server, Team, User
+from app.services.forecast import forecast_series as real_forecast_series
 
 pytestmark = pytest.mark.integration
 
@@ -151,3 +153,76 @@ async def test_reservations_produce_pool_wide_demand_forecast(factory):
     assert demand.server_id is None
     assert len(demand.horizon) > 0
     assert demand.saturation_at is None  # 수요에는 포화 개념이 없다.
+
+
+async def test_one_failing_server_does_not_block_others(factory, monkeypatch):
+    # 한 서버의 적합이 실패해도 다른 서버 예측은 계속 저장되어야 한다(잡 격리).
+    now = datetime.now(tz=timezone.utc)
+    async with factory() as db:
+        db.add_all([_server(10), _server(11)])
+        await db.flush()
+        db.add_all(_metric_rows(10, base=70.0, slope=0.2, now=now))
+        db.add_all(_metric_rows(11, base=20.0, slope=0.0, now=now))
+        await db.commit()
+
+    # 서버 10 의 시계열에 대해서만 실제 statsmodels 실패를 흉내 내 ValueError 를 던진다.
+    failing_base = 70.0
+
+    def fake_forecast_series(series, **kwargs):
+        if float(series.iloc[0]) >= failing_base:
+            raise ValueError("적합 실패 흉내")
+        return real_forecast_series(series, **kwargs)
+
+    monkeypatch.setattr(forecast_job, "forecast_series", fake_forecast_series)
+
+    await generate_forecasts(session_factory=factory)
+
+    async with factory() as db:
+        failed = (
+            await db.execute(
+                select(Forecast).where(Forecast.server_id == 10, Forecast.metric == "CPU")
+            )
+        ).scalars().all()
+        survived = (
+            await db.execute(
+                select(Forecast).where(Forecast.server_id == 11, Forecast.metric == "CPU")
+            )
+        ).scalars().all()
+
+    # 실패한 서버는 저장되지 않고, 정상 서버는 그대로 저장된다.
+    assert failed == []
+    assert len(survived) == 1
+
+
+async def test_demand_handles_trailing_zero_hours(factory):
+    # 예약이 존재하다가 now 이전에 끊겨도(최근 0수요 구간), 수요 예측이 생성·저장되어야 한다.
+    now = datetime.now(tz=timezone.utc)
+    async with factory() as db:
+        db.add(Team(id=1, name="Lab", code="LAB", total_quota_limit=10))
+        db.add(User(id=1, name="stu", email="stu@b.com", role="STU", team_id=1))
+        db.add(_server(20))
+        await db.flush()
+        # 30일 전부터 약 7일 전까지만 예약이 있고, 최근 7일(168시간)은 예약이 없다.
+        recent_gap_hours = 24 * 7
+        for hour in range(_HOURS):
+            if hour >= _HOURS - recent_gap_hours:
+                continue  # 최근 구간은 의도적으로 비워 trailing 0수요를 만든다.
+            created_at = now - timedelta(hours=_HOURS - hour)
+            db.add(Reservation(
+                user_id=1, server_id=20,
+                start_time=created_at, end_time=created_at + timedelta(hours=1),
+                status="RESERVED", created_at=created_at,
+            ))
+        await db.commit()
+
+    await generate_forecasts(session_factory=factory)
+
+    async with factory() as db:
+        demand = (
+            await db.execute(
+                select(Forecast).where(Forecast.metric == "RESERVATION_DEMAND")
+            )
+        ).scalars().one()
+
+    assert demand.server_id is None
+    assert len(demand.horizon) > 0

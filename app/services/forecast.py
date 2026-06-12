@@ -63,6 +63,12 @@ def forecast_series(
             f"예측에 필요한 최소 표본({MIN_SAMPLES})보다 적습니다: {len(series)}"
         )
 
+    # 선두에 빈 버킷이 있으면 interpolate() 가 backfill 하지 못해 NaN 이 남는다.
+    # NaN 을 그대로 적합하면 전 구간 yhat 이 NaN 이 되고 confidence=1.0 인 잘못된
+    # 행이 저장되며 JSON 직렬화도 깨진다. 적합 전에 fail-fast 로 막는다.
+    if series.isna().any():
+        raise InsufficientHistoryError("준비된 시계열에 결측(NaN)이 남아 예측할 수 없습니다.")
+
     fitted = _fit(series)
     forecast_values = fitted.forecast(horizon_hours)
     resid_std = _residual_std(fitted)
@@ -127,6 +133,8 @@ def _confidence_from_resid(series: pd.Series, resid_std: float) -> float:
     scale = float(np.mean(np.abs(series.to_numpy(dtype=float))))
     if scale <= 0:
         return 0.0
+    # 이 값은 적합이 과거를 얼마나 잘 따라갔는지를 보는 in-sample 품질 지표(0..1)다.
+    # 확률적 신뢰구간이 아니며, 미래 예측의 불확실성을 직접 보장하지는 않는다.
     return round(1.0 / (1.0 + resid_std / scale), 4)
 
 
