@@ -4,30 +4,15 @@
 기능 구현에 따라 app/api 아래에 추가한다(tree.md).
 """
 
-from contextlib import asynccontextmanager
-
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import approval_requests, auth, notifications, reservations, teams, ws
-from app.jobs.approval_jobs import auto_reject_timed_out_requests
-from app.jobs.reservation_jobs import process_reservation_transitions
 
+# 주기 잡은 스케줄러 컨테이너(app/scheduler.py)가 단독으로 돌린다. API 프로세스는
+# 잡을 등록하지 않는다(잡 이중 실행 방지). 잡 목록은 app/jobs/scheduling.py 참조.
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    scheduler = AsyncIOScheduler()
-    # UC16: 1분 주기로 예약 만료·사용 시작 자동 전이
-    scheduler.add_job(process_reservation_transitions, "interval", minutes=1)
-    # UC17: 1분 주기로 72시간 초과 PENDING 승인 요청 자동 거절
-    scheduler.add_job(auto_reject_timed_out_requests, "interval", minutes=1)
-    scheduler.start()
-    yield
-    scheduler.shutdown()
-
-
-app = FastAPI(title="서버 예약/할당 관리 시스템 API", lifespan=lifespan)
+app = FastAPI(title="서버 예약/할당 관리 시스템 API")
 
 app.add_middleware(
     CORSMiddleware,
