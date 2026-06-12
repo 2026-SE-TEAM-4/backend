@@ -16,6 +16,7 @@
 """
 
 import logging
+from typing import Protocol
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -28,6 +29,17 @@ from app.services.incident_summary import build_context, build_prompt, parse_sum
 
 logger = logging.getLogger(__name__)
 
+
+# 잡이 의존하는 Anthropic 클라이언트의 최소 계약만 적은 덕타이핑 Protocol.
+# 실제 SDK(anthropic.AsyncAnthropic)와 테스트 stub 이 같은 모양만 갖추면 서로
+# 갈아 끼울 수 있게 하려는 의도다(잡은 messages.create 한 가지만 쓴다).
+class _Messages(Protocol):
+    async def create(self, *, model: str, max_tokens: int, messages: list) -> object: ...
+
+
+class _LLMClient(Protocol):
+    messages: _Messages
+
 # 한 인시던트 요약에 허용하는 최대 토큰. 상황·원인·권장 정도의 짧은 JSON 이면 충분하다.
 _MAX_TOKENS = 1024
 # 서버당 컨텍스트에 싣는 최근 메트릭 표본 수. 너무 많으면 토큰만 늘고 도움이 안 된다.
@@ -35,7 +47,7 @@ _METRIC_SAMPLES_PER_SERVER = 5
 
 
 async def summarize_pending_incidents(
-    *, session_factory: async_sessionmaker = SessionLocal, client=None
+    *, session_factory: async_sessionmaker = SessionLocal, client: _LLMClient | None = None
 ) -> None:
     """요약이 없는 OPEN 인시던트 각각에 LLM 원인 요약을 만들어 저장한다.
 
@@ -69,13 +81,16 @@ async def _find_open_incidents_without_summary(db: AsyncSession) -> list[Inciden
     rows = await db.execute(
         select(Incident).where(
             Incident.status == IncidentStatus.OPEN.value,
+            # NOT IN 의 정확성은 incident_summary.incident_id 가 NOT NULL 인 데 달려 있다.
+            # 나중에 이 컬럼을 nullable 로 바꾸면 NULL 한 행이 NOT IN 을 전부 무력화해
+            # 이미 요약된 인시던트도 다시 요약되니, 변경 시 이 쿼리를 함께 손봐야 한다.
             Incident.id.not_in(summarized),
         )
     )
     return list(rows.scalars().all())
 
 
-async def _summarize_one(db: AsyncSession, incident: Incident, client) -> None:
+async def _summarize_one(db: AsyncSession, incident: Incident, client: _LLMClient) -> None:
     """한 인시던트의 컨텍스트를 모아 LLM 요약을 만들고 IncidentSummary 로 저장한다.
 
     한 인시던트의 실패(호출 오류·파싱 실패)가 전체 잡을 멈추지 않도록 여기서 잡아
@@ -170,7 +185,7 @@ async def _recent_metrics(db: AsyncSession, server_ids: list[int]) -> list[Serve
     return samples
 
 
-def _response_text(response) -> str:
+def _response_text(response: object) -> str:
     """Anthropic 응답 객체에서 텍스트 블록만 이어 붙인다.
 
     content 는 블록 리스트이고 텍스트 블록은 .text 를 갖는다. 텍스트가 아닌 블록은
@@ -184,7 +199,7 @@ def _response_text(response) -> str:
     return "".join(parts)
 
 
-def _build_client():
+def _build_client() -> _LLMClient:
     """키가 있을 때만 Anthropic 비동기 클라이언트를 지연 생성한다.
 
     import 를 함수 안에 두는 이유: anthropic 패키지는 스케줄러 컨테이너에만 필요하고,

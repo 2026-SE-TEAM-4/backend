@@ -120,3 +120,36 @@ def test_parse_summary_missing_keys_raises():
     # situation 만 있고 rootCauses/recommendations 가 없으면 형식 위반으로 거른다.
     with pytest.raises(SummaryParseError):
         parse_summary(json.dumps({"situation": "상황만 있음"}))
+
+
+def test_parse_summary_rootcauses_item_not_dict_raises():
+    # rootCauses 항목이 dict 가 아니라 문자열이면 형식 위반으로 거른다.
+    bad = {
+        "situation": "상황",
+        "rootCauses": ["원인 문자열"],
+        "recommendations": [{"action": "조치", "rationale": "이유"}],
+    }
+    with pytest.raises(SummaryParseError):
+        parse_summary(json.dumps(bad))
+
+
+def test_parse_summary_rootcauses_item_missing_evidence_raises():
+    # rootCauses 항목에 evidence 키가 빠지면 형식 위반으로 거른다.
+    bad = {
+        "situation": "상황",
+        "rootCauses": [{"cause": "원인만 있음"}],
+        "recommendations": [{"action": "조치", "rationale": "이유"}],
+    }
+    with pytest.raises(SummaryParseError):
+        parse_summary(json.dumps(bad))
+
+
+def test_parse_summary_recommendations_item_missing_rationale_raises():
+    # recommendations 항목에 rationale 키가 빠지면 형식 위반으로 거른다.
+    bad = {
+        "situation": "상황",
+        "rootCauses": [{"cause": "원인", "evidence": "근거"}],
+        "recommendations": [{"action": "조치만 있음"}],
+    }
+    with pytest.raises(SummaryParseError):
+        parse_summary(json.dumps(bad))

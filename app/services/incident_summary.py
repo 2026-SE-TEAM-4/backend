@@ -24,8 +24,8 @@ class ParsedSummary:
     """파싱된 요약 한 건. IncidentSummary 모델에 그대로 저장할 수 있는 형태."""
 
     situation: str
-    root_causes: list[dict]  # [{cause, evidence}]
-    recommendations: list[dict]  # [{action, rationale}]
+    root_causes: list[dict[str, str]]  # [{cause, evidence}]
+    recommendations: list[dict[str, str]]  # [{action, rationale}]
 
 
 def build_context(
@@ -120,11 +120,41 @@ def parse_summary(response_text: str) -> ParsedSummary:
     if missing:
         raise SummaryParseError(f"요약 응답에 필수 키가 없습니다: {sorted(missing)}")
 
+    # 프롬프트가 항목별 STRICT 키까지 요구하므로 최상위뿐 아니라 항목 모양도 검증한다.
+    # 깨진 항목을 그대로 저장하면 API·프런트가 cause/evidence 를 꺼낼 때 KeyError 가 난다.
+    root_causes = _require_items(data["rootCauses"], "rootCauses", ("cause", "evidence"))
+    recommendations = _require_items(
+        data["recommendations"], "recommendations", ("action", "rationale")
+    )
+
     return ParsedSummary(
         situation=str(data["situation"]),
-        root_causes=list(data["rootCauses"]),
-        recommendations=list(data["recommendations"]),
+        root_causes=root_causes,
+        recommendations=recommendations,
     )
+
+
+def _require_items(
+    value: object, field: str, required_keys: tuple[str, ...]
+) -> list[dict[str, str]]:
+    """리스트의 각 항목이 required_keys 를 가진 dict 인지 확인하고 아니면 거른다.
+
+    모델이 키 이름을 어기거나 항목을 문자열로 보내는 경우를 잡아 SummaryParseError 로
+    바꾼다. 잡은 이 신호를 받아 해당 인시던트만 건너뛴다(저장하지 않는다).
+    """
+    if not isinstance(value, list):
+        raise SummaryParseError(f"요약 응답의 {field} 가 리스트가 아닙니다.")
+    items: list[dict[str, str]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            raise SummaryParseError(f"요약 응답의 {field} 항목이 객체가 아닙니다.")
+        missing = set(required_keys) - item.keys()
+        if missing:
+            raise SummaryParseError(
+                f"요약 응답의 {field} 항목에 필수 키가 없습니다: {sorted(missing)}"
+            )
+        items.append({key: str(item[key]) for key in required_keys})
+    return items
 
 
 def _strip_code_fence(text: str) -> str:

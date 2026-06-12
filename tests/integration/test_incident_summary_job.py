@@ -56,6 +56,21 @@ class _StubClient:
         self.messages = _StubMessages(payload)
 
 
+def _server_ids_in_prompt(prompt: str) -> set[int]:
+    """프롬프트 끝에 박힌 운영 데이터 JSON 을 파싱해 등장하는 serverId 집합을 돌려준다.
+
+    build_prompt 가 컨텍스트를 "운영 데이터:\n{json}" 형태로 싣는다는 계약에만 기대고,
+    그 안의 JSON 을 구조적으로 읽는다. 프롬프트 문구가 바뀌어도 JSON 구조가 유지되는 한
+    인시던트 라우팅이 깨지지 않는다(취약한 문자열 조각 매칭을 피한다).
+    """
+    marker = "운영 데이터:\n"
+    start = prompt.index(marker) + len(marker)
+    context = json.loads(prompt[start:])
+    incident_servers = set(context["incident"]["serverIds"])
+    anomaly_servers = {anomaly["serverId"] for anomaly in context["anomalies"]}
+    return incident_servers | anomaly_servers
+
+
 _VALID_PAYLOAD = {
     "situation": "서버 1의 CPU 사용률이 평균을 크게 초과했습니다 (서버 1 CPU 99%).",
     "rootCauses": [
@@ -180,11 +195,14 @@ async def test_one_failing_incident_does_not_block_others(factory, monkeypatch):
         good_id, bad_id = good.id, bad.id
 
     # 서버 2가 묶인 인시던트(bad)에는 깨진 JSON 을, 나머지에는 정상 JSON 을 돌려준다.
+    # 프롬프트 문자열 조각이 아니라 프롬프트에 박힌 컨텍스트(serverIds)를 구조적으로
+    # 읽어 라우팅한다. 이렇게 두면 프롬프트 서식이 바뀌어도 라우팅이 조용히 깨지지 않는다.
     class _MixedMessages(_StubMessages):
         async def create(self, **kwargs):
             self.calls += 1
             prompt = kwargs["messages"][0]["content"]
-            if '"id": 2' in prompt or '"serverIds": [\n    2' in prompt or '"serverId": 2' in prompt:
+            server_ids = _server_ids_in_prompt(prompt)
+            if 2 in server_ids:
                 return _StubMessage("깨진 응답: JSON 아님")
             return _StubMessage(json.dumps(_VALID_PAYLOAD))
 
@@ -209,3 +227,36 @@ async def test_one_failing_incident_does_not_block_others(factory, monkeypatch):
     # 정상 인시던트는 저장되고, 파싱 실패 인시던트는 저장되지 않는다.
     assert len(good_rows) == 1
     assert bad_rows == []
+
+
+async def test_malformed_response_stores_nothing_and_does_not_raise(factory, monkeypatch):
+    # 요약 JSON 이 아닌 평문이 와도 잡은 예외를 밖으로 던지지 않고(격리),
+    # 해당 인시던트를 그냥 건너뛴다(IncidentSummary 0건). _response_text →
+    # parse_summary → skip 경로를 잡 경계에서 직접 검증한다.
+    monkeypatch.setattr(settings, "anthropic_api_key", "test-key")
+    incident_id = await _seed_open_incident(factory)
+
+    class _ProseMessages(_StubMessages):
+        async def create(self, **kwargs):
+            # 코드펜스도 JSON 도 아닌 평범한 산문. parse_summary 가 거른다.
+            self.calls += 1
+            return _StubMessage("CPU 사용률이 높아 보입니다. 확인이 필요합니다.")
+
+    class _ProseClient:
+        def __init__(self) -> None:
+            self.messages = _ProseMessages(_VALID_PAYLOAD)
+
+    stub = _ProseClient()
+    # 예외가 위로 전파되지 않아야 한다(잡 격리). 전파되면 이 호출에서 테스트가 깨진다.
+    await summarize_pending_incidents(session_factory=factory, client=stub)
+
+    async with factory() as db:
+        summaries = (
+            await db.execute(
+                select(IncidentSummary).where(IncidentSummary.incident_id == incident_id)
+            )
+        ).scalars().all()
+
+    # 파싱 실패로 저장은 0건이고, 모델 호출은 한 번 일어났다(시도는 했다).
+    assert summaries == []
+    assert stub.messages.calls == 1
