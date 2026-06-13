@@ -21,6 +21,7 @@ backend/
 │   │   ├── reservations.py
 │   │   ├── servers.py         # 서버 CRUD·대안·점검(F01·02·08·14~16) + 건강추세(UC23)
 │   │   ├── ops.py             # 대시보드·가용성(F21·22) + 인시던트·예측·요약(UC22·24·25)
+│   │   ├── admin.py           # 고급 관리 — 운영 데이터 초기화(F35)
 │   │   ├── quotas.py          # 팀원 Quota 조정(F13)
 │   │   ├── users.py           # 계정 잠금 해제(F20)
 │   │   ├── teams.py
@@ -45,6 +46,7 @@ backend/
 │   │   ├── auth.py
 │   │   ├── approval_request.py
 │   │   ├── notification.py
+│   │   ├── admin.py           # 고급 관리 초기화 스키마(F35)
 │   │   ├── ops.py             # AIOps + 대시보드·가용성 스키마
 │   │   ├── quota.py
 │   │   ├── reservation.py
@@ -54,6 +56,7 @@ backend/
 │   │   ├── auth_service.py
 │   │   ├── approval_service.py
 │   │   ├── notification_service.py
+│   │   ├── admin.py           # 운영 데이터 초기화 로직(F35)
 │   │   ├── ops_dashboard.py   # 대시보드·가용성 집계(F21·22)
 │   │   ├── quota_service.py
 │   │   ├── reservation_service.py

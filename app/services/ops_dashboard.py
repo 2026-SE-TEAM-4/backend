@@ -160,8 +160,22 @@ async def get_dashboard(session: AsyncSession) -> OpsDashboardResponse:
 
 async def get_availability(session: AsyncSession) -> AvailabilityResponse:
     since_24h = _now() - timedelta(hours=24)
+    active_ids = set(
+        (await session.execute(
+            select(ServerMetric.server_id)
+            .where(
+                ServerMetric.collected_at >= since_24h,
+                ServerMetric.status == MetricStatus.OK.value,
+            )
+            .distinct()
+        )).scalars().all()
+    )
     servers = (
-        await session.execute(select(Server).where(Server.deleted_at.is_(None)).order_by(Server.id))
+        await session.execute(
+            select(Server)
+            .where(Server.deleted_at.is_(None), Server.id.in_(active_ids))
+            .order_by(Server.id)
+        )
     ).scalars().all()
 
     items: list[ServerAvailability] = []

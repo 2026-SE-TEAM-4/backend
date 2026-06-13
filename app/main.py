@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import (
+    admin,
     approval_requests,
     auth,
     notifications,
@@ -34,6 +35,7 @@ app.add_middleware(
 )
 
 app.include_router(auth.router)
+app.include_router(admin.router)
 app.include_router(reservations.router)
 app.include_router(approval_requests.router)
 app.include_router(notifications.router)
