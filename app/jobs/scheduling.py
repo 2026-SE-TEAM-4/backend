@@ -32,22 +32,22 @@ def register_jobs(scheduler: AsyncIOScheduler) -> None:
     scheduler.add_job(collect_server_metrics, "interval", seconds=5,
                       id="metric_collection", replace_existing=True)
     # F27: 이상탐지
-    scheduler.add_job(detect_anomalies, "interval", seconds=15,
+    scheduler.add_job(detect_anomalies, "interval", seconds=5,
                       id="anomaly_detection", replace_existing=True)
     # F28: 건강점수 산출
-    scheduler.add_job(compute_health_scores, "interval", seconds=30,
+    scheduler.add_job(compute_health_scores, "interval", seconds=10,
                       id="health_score", replace_existing=True)
     # F33: 인시던트 상관(이상 묶기·노이즈 감소)
-    scheduler.add_job(correlate_anomalies, "interval", seconds=15,
+    scheduler.add_job(correlate_anomalies, "interval", seconds=5,
                       id="incident_correlation", replace_existing=True)
-    # F31: 용량·수요 예측(Holt-Winters, 7일)
-    scheduler.add_job(generate_forecasts, "interval", minutes=1,
+    # F31: 용량·수요 예측(Holt-Winters, 7일 데이터 연산 비용 고려)
+    scheduler.add_job(generate_forecasts, "interval", seconds=30,
                       id="forecast", replace_existing=True)
     # F34: LLM 원인 요약(OPEN 인시던트당 1회, 키 없으면 잡 내부에서 건너뜀)
-    scheduler.add_job(summarize_pending_incidents, "interval", seconds=15,
+    scheduler.add_job(summarize_pending_incidents, "interval", seconds=10,
                       id="incident_summary", replace_existing=True)
     # F32: 장애·건강 열화 예측(7일 추세 + 위험도, F28 직후)
-    scheduler.add_job(predict_failures, "interval", seconds=30,
+    scheduler.add_job(predict_failures, "interval", seconds=15,
                       id="failure_prediction", replace_existing=True)
     # F24: 유휴 서버 감지·자동 회수(경고 후 회수)
     scheduler.add_job(reclaim_idle_servers, "interval", seconds=5,

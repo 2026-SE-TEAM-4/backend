@@ -29,7 +29,7 @@ from app.models.enums import UserRole
 from app.services.failure_prediction import (
     compute_risk_score,
     estimate_eta_to_risk,
-    ewma_slope,
+    health_slope_per_day,
     risk_drivers,
 )
 from app.services.scheduler_log import add_scheduler_log
@@ -74,7 +74,7 @@ async def _predict_one_server(
 ) -> None:
     """한 서버의 위험도·위험 진입 시각을 산출해 반영하고, 고위험이면 알림을 만든다."""
     history = await _health_history(db, server.id, now)
-    slope = ewma_slope(history)
+    slope = health_slope_per_day(history)
     anomaly_count = await _anomaly_count_24h(db, server.id, now)
 
     risk = compute_risk_score(

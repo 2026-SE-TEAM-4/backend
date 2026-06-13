@@ -159,3 +159,47 @@ class ServerAvailability(_CamelSchema):
 class AvailabilityResponse(_CamelSchema):
     servers: list[ServerAvailability]
     system_availability: float
+
+
+# --- 메트릭 히스토리(읽기 전용 시각화, §5) ---
+
+
+class MetricSeriesPoint(BaseModel):
+    """시계열 한 점. 버킷 평균이며 gpu 는 미탑재 노드에서 null."""
+
+    ts: datetime
+    cpu: float
+    mem: float
+    net: float
+    gpu: float | None
+
+
+class ServerMetricSeriesResponse(BaseModel):
+    """서버 1대의 사용률 시계열(버킷 평균)."""
+
+    server_id: int = Field(serialization_alias="serverId")
+    window: str
+    points: list[MetricSeriesPoint]
+
+
+class MetricHeatmapResponse(BaseModel):
+    """서버×시간 히트맵. cells[i][j] = 서버 i 의 j 버킷 평균(없으면 null)."""
+
+    metric: str
+    server_ids: list[int] = Field(serialization_alias="servers")
+    server_names: list[str] = Field(serialization_alias="serverNames")
+    buckets: list[datetime]
+    cells: list[list[float | None]]
+
+
+class ServerAnomalyResponse(BaseModel):
+    """서버별 최근 이상 한 건(anomaly_record 직역)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    metric: str
+    current_value: float = Field(serialization_alias="currentValue")
+    mean: float
+    stddev: float
+    detected_at: datetime = Field(serialization_alias="detectedAt")

@@ -48,16 +48,33 @@ class ServerCreateResponse(ApiSchema):
     version: int
 
 
+class LatestMetric(ApiSchema):
+    cpu_usage: float
+    mem_usage: float
+    net_usage: float
+    gpu_usage: float | None = None
+    status: str
+    collected_at: datetime
+
+
 class ServerDetailResponse(ApiSchema):
     id: int
     name: str
     status: str
     spec: ServerSpec
     health_score: int | None
-
-
-class ServerListItem(ServerDetailResponse):
+    # 프런트 카드/상세에서 함께 쓰는 서버 메타·위험 지표.
+    ip: str | None = None
+    group_name: str | None = None
+    risk_score: float | None = None
+    eta_to_risk: datetime | None = None
     occupant: str | None = None
+    latest_metric: LatestMetric | None = None
+
+
+# 목록과 상세가 같은 표현을 공유한다. 별도 필드는 두지 않는다.
+class ServerListItem(ServerDetailResponse):
+    pass
 
 
 class ServerListResponse(ApiSchema):

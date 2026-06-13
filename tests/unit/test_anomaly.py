@@ -38,7 +38,15 @@ def test_zero_variance_history_is_never_anomaly():
 
 
 def test_custom_k_widens_band():
-    history = _stable_history()  # σ ≈ 1
-    # latest=53 은 2σ 밖이지만 k=5 밴드 안이다.
-    assert evaluate_anomaly(history, latest=53.0, k=2.0).is_anomaly is True
-    assert evaluate_anomaly(history, latest=53.0, k=5.0).is_anomaly is False
+    # 안정 구간은 σ 가 작아 판정용 σ 가 하한(_MIN_SIGMA=8)으로 올라간다.
+    # latest=75(평균 50 에서 25 이탈)는 k=2 밴드(16) 밖이지만 k=5 밴드(40) 안이다.
+    history = _stable_history()
+    assert evaluate_anomaly(history, latest=75.0, k=2.0).is_anomaly is True
+    assert evaluate_anomaly(history, latest=75.0, k=5.0).is_anomaly is False
+
+
+def test_small_deviation_on_stable_baseline_is_not_anomaly():
+    # σ 하한이 없으면 σ≈1 인 구간에서 5 만 벗어나도 이상(5 > 2.5·1)이 된다.
+    # 하한(8) 덕분에 밴드가 2.5·8=20 이라, 평소 잔떨림 수준의 작은 이탈은 무시한다.
+    decision = evaluate_anomaly(_stable_history(), latest=55.0)
+    assert decision.is_anomaly is False

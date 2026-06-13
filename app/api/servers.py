@@ -18,7 +18,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.deps import get_current_user, get_db, require_role
 from app.core.exceptions import ConflictError, NotFoundError
 from app.models import AnomalyRecord, Server, ServerHealthHistory, User
-from app.schemas.ops import HealthTrendPoint, HealthTrendResponse
+from app.schemas.ops import (
+    HealthTrendPoint,
+    HealthTrendResponse,
+    ServerAnomalyResponse,
+    ServerMetricSeriesResponse,
+)
 from app.schemas.servers import (
     MaintenanceCreate,
     MaintenanceCreateResponse,
@@ -30,8 +35,9 @@ from app.schemas.servers import (
     ServerListResponse,
     ServerSort,
 )
+from app.services import metrics_history
 from app.services import servers as server_service
-from app.services.failure_prediction import classify_trend, ewma_slope, risk_drivers
+from app.services.failure_prediction import classify_trend, health_slope_per_day, risk_drivers
 
 router = APIRouter(prefix="/servers", tags=["servers"])
 
@@ -109,12 +115,12 @@ async def list_alternatives(
 @router.get("/{server_id}", response_model=ServerDetailResponse)
 async def get_server(
     server_id: int,
-    _user: User = Depends(get_current_user),
+    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> ServerDetailResponse:
     """서버 상세 조회 [UC01]. 없으면 404."""
     try:
-        return await server_service.get_server(db, server_id)
+        return await server_service.get_server(db, server_id, user.role)
     except NotFoundError as error:
         _raise_api_error(error)
         raise
@@ -137,7 +143,7 @@ async def get_health_trend(
 
     now = datetime.now(tz=timezone.utc)
     history_rows = await _health_history(db, server_id, now)
-    slope = ewma_slope([(ts, float(score)) for ts, score in history_rows])
+    slope = health_slope_per_day([(ts, float(score)) for ts, score in history_rows])
     anomaly_count = await _anomaly_count_24h(db, server_id, now)
 
     drivers = risk_drivers(
@@ -154,6 +160,45 @@ async def get_health_trend(
         history=[HealthTrendPoint(ts=ts, health_score=score) for ts, score in history_rows],
         drivers=drivers,
     )
+
+
+@router.get("/{server_id}/metrics", response_model=ServerMetricSeriesResponse)
+async def get_server_metrics(
+    server_id: int,
+    window: str = "6h",
+    _user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ServerMetricSeriesResponse:
+    """서버 사용률 시계열 조회(§5). 잘못된 window 는 400, 없는 서버는 404.
+
+    server_metric 을 윈도우 균등 버킷으로 평균내 차트가 가볍게 그려지게 한다.
+    """
+    if window not in metrics_history.window_options():
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"window 는 {metrics_history.window_options()} 중 하나여야 합니다.",
+        )
+    await _require_server(db, server_id)
+    data = await metrics_history.build_server_series(db, server_id, window)
+    return ServerMetricSeriesResponse.model_validate(data)
+
+
+@router.get("/{server_id}/anomalies", response_model=list[ServerAnomalyResponse])
+async def get_server_anomalies(
+    server_id: int,
+    window: str = "24h",
+    _user: User = Depends(require_role("MGR", "ADM")),
+    db: AsyncSession = Depends(get_db),
+) -> list[ServerAnomalyResponse]:
+    """서버별 최근 이상 목록 조회(§5). 잘못된 window 는 400, 없는 서버는 404."""
+    if window not in metrics_history.window_options():
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"window 는 {metrics_history.window_options()} 중 하나여야 합니다.",
+        )
+    await _require_server(db, server_id)
+    anomalies = await metrics_history.list_recent_anomalies(db, server_id, window)
+    return [ServerAnomalyResponse.model_validate(anomaly) for anomaly in anomalies]
 
 
 @router.delete("/{server_id}", response_model=ServerDeleteResponse)
@@ -187,6 +232,14 @@ async def create_maintenance(
     except (ConflictError, NotFoundError) as error:
         _raise_api_error(error)
         raise
+
+
+async def _require_server(db: AsyncSession, server_id: int) -> Server:
+    """삭제되지 않은 서버를 가져오거나 404 를 낸다."""
+    server = await db.get(Server, server_id)
+    if server is None or server.deleted_at is not None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "서버를 찾을 수 없습니다.")
+    return server
 
 
 async def _health_history(

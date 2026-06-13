@@ -2,7 +2,9 @@
 
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import func, select
+from collections import defaultdict
+
+from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import ApprovalRequest, AuditLog, Reservation, SchedulerLog, Server, ServerMetric
@@ -76,15 +78,14 @@ async def get_dashboard(session: AsyncSession) -> OpsDashboardResponse:
         for row in scheduler_rows
     ]
 
-    metric_total = await session.scalar(
-        select(func.count()).select_from(ServerMetric).where(ServerMetric.collected_at >= since_24h)
-    )
-    metric_success = await session.scalar(
-        select(func.count()).select_from(ServerMetric).where(
-            ServerMetric.collected_at >= since_24h,
-            ServerMetric.status == MetricStatus.OK.value,
-        )
-    )
+    metric_row = (await session.execute(
+        select(
+            func.count().label("total"),
+            func.sum(case((ServerMetric.status == MetricStatus.OK.value, 1), else_=0)).label("success"),
+        ).where(ServerMetric.collected_at >= since_24h)
+    )).one()
+    metric_total = metric_row.total
+    metric_success = metric_row.success or 0
     missing_servers = (
         await session.execute(
             select(Server.name)
@@ -119,25 +120,16 @@ async def get_dashboard(session: AsyncSession) -> OpsDashboardResponse:
         )
     )
 
-    normal_count = await session.scalar(
-        select(func.count()).select_from(Server).where(
-            Server.deleted_at.is_(None),
-            Server.health_score >= 80,
-        )
-    )
-    caution_count = await session.scalar(
-        select(func.count()).select_from(Server).where(
-            Server.deleted_at.is_(None),
-            Server.health_score >= 50,
-            Server.health_score < 80,
-        )
-    )
-    danger_count = await session.scalar(
-        select(func.count()).select_from(Server).where(
-            Server.deleted_at.is_(None),
-            (Server.health_score < 50) | (Server.health_score.is_(None)),
-        )
-    )
+    health_row = (await session.execute(
+        select(
+            func.sum(case((Server.health_score >= 80, 1), else_=0)).label("normal"),
+            func.sum(case(((Server.health_score >= 50) & (Server.health_score < 80), 1), else_=0)).label("caution"),
+            func.sum(case(((Server.health_score < 50) | Server.health_score.is_(None), 1), else_=0)).label("danger"),
+        ).where(Server.deleted_at.is_(None))
+    )).one()
+    normal_count = health_row.normal or 0
+    caution_count = health_row.caution or 0
+    danger_count = health_row.danger or 0
 
     return OpsDashboardResponse(
         scheduler=scheduler,
@@ -178,23 +170,29 @@ async def get_availability(session: AsyncSession) -> AvailabilityResponse:
         )
     ).scalars().all()
 
+    # 서버별 N+1 쿼리 대신 단일 쿼리로 전체 로드 후 Python에서 그룹핑
+    all_metrics = (
+        await session.execute(
+            select(ServerMetric.server_id, ServerMetric.status)
+            .where(
+                ServerMetric.server_id.in_(active_ids),
+                ServerMetric.collected_at >= since_24h,
+            )
+            .order_by(ServerMetric.server_id, ServerMetric.collected_at.asc())
+        )
+    ).all()
+    server_statuses: dict[int, list[str]] = defaultdict(list)
+    for server_id, status in all_metrics:
+        server_statuses[server_id].append(status)
+
     items: list[ServerAvailability] = []
     total_uptime = 0
     total_samples = 0
 
     for server in servers:
-        statuses = (
-            await session.execute(
-                select(ServerMetric.status)
-                .where(
-                    ServerMetric.server_id == server.id,
-                    ServerMetric.collected_at >= since_24h,
-                )
-                .order_by(ServerMetric.collected_at.asc())
-            )
-        ).scalars().all()
+        statuses = server_statuses[server.id]
         sample_count = len(statuses)
-        uptime_minutes, _downtime_minutes, mtbf_minutes, mttr_minutes = _availability_stats(list(statuses))
+        uptime_minutes, _downtime_minutes, mtbf_minutes, mttr_minutes = _availability_stats(statuses)
         uptime = round((uptime_minutes / sample_count) * 100, 2) if sample_count else 0.0
 
         total_uptime += uptime_minutes

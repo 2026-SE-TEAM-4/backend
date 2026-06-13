@@ -6,10 +6,11 @@ from sqlalchemy import and_, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import ConflictError, NotFoundError
-from app.models import MaintenanceSchedule, Reservation, Server, Team, User
+from app.models import MaintenanceSchedule, Reservation, Server, ServerMetric, Team, User
 from app.models.enums import ReservationStatus, ServerStatus
 from app.schemas.servers import (
     AlternativeSpec,
+    LatestMetric,
     MaintenanceCreate,
     MaintenanceCreateResponse,
     ServerAlternative,
@@ -48,7 +49,66 @@ def _server_detail(server: Server) -> ServerDetailResponse:
         status=server.status,
         spec=_server_spec(server),
         health_score=server.health_score,
+        ip=server.ip,
+        group_name=server.group_name,
+        risk_score=server.risk_score,
+        eta_to_risk=server.eta_to_risk,
     )
+
+
+def _to_latest_metric(raw_metric: ServerMetric | None) -> LatestMetric | None:
+    if raw_metric is None:
+        return None
+    return LatestMetric(
+        cpu_usage=raw_metric.cpu_usage,
+        mem_usage=raw_metric.mem_usage,
+        net_usage=raw_metric.net_usage,
+        gpu_usage=raw_metric.gpu_usage,
+        status=raw_metric.status,
+        collected_at=raw_metric.collected_at,
+    )
+
+
+async def _latest_metric_for(session: AsyncSession, server_id: int) -> LatestMetric | None:
+    """서버 한 대의 최신 메트릭을 단건 조회한다."""
+    raw_metric = await session.scalar(
+        select(ServerMetric)
+        .where(ServerMetric.server_id == server_id)
+        .order_by(ServerMetric.collected_at.desc())
+        .limit(1)
+    )
+    return _to_latest_metric(raw_metric)
+
+
+async def _occupant_label(
+    session: AsyncSession,
+    server_id: int,
+    user_role: str,
+    current_time: datetime,
+) -> str | None:
+    """현재 점유 중인 사용자 라벨. ADM/MGR 은 실명, 그 외는 팀 코드."""
+    occupant = (
+        await session.execute(
+            select(User, Team)
+            .select_from(Reservation)
+            .join(User, User.id == Reservation.user_id)
+            .join(Team, Team.id == User.team_id)
+            .where(
+                Reservation.server_id == server_id,
+                Reservation.status.in_(ACTIVE_RESERVATION_STATUSES),
+                Reservation.start_time <= current_time,
+                Reservation.end_time >= current_time,
+            )
+            .order_by(Reservation.end_time.asc())
+            .limit(1)
+        )
+    ).first()
+    if occupant is None:
+        return None
+    user, team = occupant
+    if user and team:
+        return user.name if user_role in ["ADM", "MGR"] else team.code
+    return None
 
 
 async def create_server(session: AsyncSession, data: ServerCreate) -> ServerCreateResponse:
@@ -79,11 +139,17 @@ async def create_server(session: AsyncSession, data: ServerCreate) -> ServerCrea
     return ServerCreateResponse(id=server.id, status=server.status, version=server.version)
 
 
-async def get_server(session: AsyncSession, server_id: int) -> ServerDetailResponse:
+async def get_server(
+    session: AsyncSession, server_id: int, user_role: str
+) -> ServerDetailResponse:
     server = await session.get(Server, server_id)
     if server is None or server.deleted_at is not None:
         raise NotFoundError("서버를 찾을 수 없습니다.")
-    return _server_detail(server)
+
+    detail = _server_detail(server)
+    detail.occupant = await _occupant_label(session, server.id, user_role, _now())
+    detail.latest_metric = await _latest_metric_for(session, server.id)
+    return detail
 
 
 async def list_servers(
@@ -115,36 +181,44 @@ async def list_servers(
         )
     ).scalars().all()
 
+    server_ids = [s.id for s in servers]
+
+    # 서버별 최신 메트릭을 한 번의 쿼리로 조회 (서버당 N+1 방지)
+    latest_metric_map: dict[int, ServerMetric] = {}
+    if server_ids:
+        max_at_subq = (
+            select(
+                ServerMetric.server_id,
+                func.max(ServerMetric.collected_at).label("max_at"),
+            )
+            .where(ServerMetric.server_id.in_(server_ids))
+            .group_by(ServerMetric.server_id)
+            .subquery()
+        )
+        metric_rows = (
+            await session.execute(
+                select(ServerMetric).join(
+                    max_at_subq,
+                    and_(
+                        ServerMetric.server_id == max_at_subq.c.server_id,
+                        ServerMetric.collected_at == max_at_subq.c.max_at,
+                    ),
+                )
+            )
+        ).scalars().all()
+        for m in metric_rows:
+            latest_metric_map[m.server_id] = m
+
     items: list[ServerListItem] = []
     current_time = _now()
     for server in servers:
-        occupant = (
-            await session.execute(
-                select(Reservation, User, Team)
-                .join(User, User.id == Reservation.user_id)
-                .join(Team, Team.id == User.team_id)
-                .where(
-                    Reservation.server_id == server.id,
-                    Reservation.status.in_(ACTIVE_RESERVATION_STATUSES),
-                    Reservation.start_time <= current_time,
-                    Reservation.end_time >= current_time,
-                )
-                .order_by(Reservation.end_time.asc())
-                .limit(1)
-            )
-        ).first()
-        user = occupant[1] if occupant else None
-        team = occupant[2] if occupant else None
-        occupant_value = None
-        if user and team:
-            occupant_value = user.name if user_role in ["ADM", "MGR"] else team.code
+        occupant_value = await _occupant_label(session, server.id, user_role, current_time)
+        latest_metric = _to_latest_metric(latest_metric_map.get(server.id))
 
-        items.append(
-            ServerListItem(
-                **_server_detail(server).model_dump(),
-                occupant=occupant_value,
-            )
-        )
+        item = ServerListItem.model_validate(_server_detail(server).model_dump())
+        item.occupant = occupant_value
+        item.latest_metric = latest_metric
+        items.append(item)
 
     return ServerListResponse(servers=items)
 

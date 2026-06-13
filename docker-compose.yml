@@ -31,7 +31,7 @@ services:
   # 마이그레이션은 api에서만 수행한다(scheduler와 중복 방지).
   api:
     build: .
-    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+    command: sh -c "alembic upgrade head && python -m scripts.seed && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
     env_file: .env
     ports:
       - "8000:8000"

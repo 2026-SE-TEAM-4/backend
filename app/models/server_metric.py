@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import BigInteger, DateTime, Float, ForeignKey, String, func
+from sqlalchemy import BigInteger, DateTime, Float, ForeignKey, Index, String, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -10,6 +10,10 @@ from app.database import Base
 
 class ServerMetric(Base):
     __tablename__ = "server_metric"
+    __table_args__ = (
+        # 가용성·이상탐지 쿼리의 핵심 필터: (server_id, collected_at) 순서 조회
+        Index("ix_server_metric_server_id_collected_at", "server_id", "collected_at"),
+    )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     server_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("server.id"))

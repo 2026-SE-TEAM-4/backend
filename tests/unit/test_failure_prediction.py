@@ -13,7 +13,7 @@ from app.services.failure_prediction import (
     classify_trend,
     compute_risk_score,
     estimate_eta_to_risk,
-    ewma_slope,
+    health_slope_per_day,
     risk_drivers,
 )
 
@@ -24,26 +24,35 @@ def _daily_history(scores: list[float]) -> list[tuple[datetime, float]]:
     return [(base + timedelta(days=i), score) for i, score in enumerate(scores)]
 
 
-# --- ewma_slope ------------------------------------------------------------
+# --- health_slope_per_day --------------------------------------------------
 
-def test_ewma_slope_is_negative_for_declining_history():
+def test_slope_is_negative_for_declining_history():
     # 90 → 60 으로 하루 5점씩 떨어지는 이력. 기울기는 음수(열화)여야 한다.
-    slope = ewma_slope(_daily_history([90, 85, 80, 75, 70, 65, 60]))
+    slope = health_slope_per_day(_daily_history([90, 85, 80, 75, 70, 65, 60]))
     assert slope < 0
 
 
-def test_ewma_slope_is_positive_for_rising_history():
-    slope = ewma_slope(_daily_history([60, 65, 70, 75, 80, 85, 90]))
+def test_slope_is_positive_for_rising_history():
+    slope = health_slope_per_day(_daily_history([60, 65, 70, 75, 80, 85, 90]))
     assert slope > 0
 
 
-def test_ewma_slope_is_zero_for_single_point():
-    # 표본이 하나뿐이면 기울기를 정의할 수 없어 0 이다.
-    assert ewma_slope(_daily_history([80])) == 0.0
+def test_slope_is_zero_for_single_point():
+    # 표본이 적으면(_MIN_POINTS 미만) 기울기를 정의할 수 없어 0 이다.
+    assert health_slope_per_day(_daily_history([80])) == 0.0
 
 
-def test_ewma_slope_is_zero_for_empty_history():
-    assert ewma_slope([]) == 0.0
+def test_slope_is_zero_for_empty_history():
+    assert health_slope_per_day([]) == 0.0
+
+
+def test_slope_is_clamped_for_subdaily_noise():
+    # 10분 간격으로 점수가 흔들리면 순간 기울기는 수백/일로 폭발한다. 직선 적합 +
+    # 절대 상한(±20)으로, 결과는 물리적으로 의미 있는 범위 안에 머물러야 한다.
+    base = datetime(2026, 6, 1, tzinfo=timezone.utc)
+    noisy = [(base + timedelta(minutes=10 * i), 85 + (5 if i % 2 else -5)) for i in range(12)]
+    slope = health_slope_per_day(noisy)
+    assert -20.0 <= slope <= 20.0
 
 
 # --- classify_trend (데드밴드 포함) ----------------------------------------

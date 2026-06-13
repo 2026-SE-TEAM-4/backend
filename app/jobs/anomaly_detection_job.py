@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 _BASELINE_WINDOW = timedelta(days=7)
 _MAX_SAMPLES = 1000
 # 같은 서버·메트릭 이상은 이 시간 내 한 번만 기록(알림 폭주 방지).
-_DEBOUNCE = timedelta(minutes=10)
+_DEBOUNCE = timedelta(hours=1)
 
 # MetricType → ServerMetric 컬럼명.
 _METRIC_ATTR = {

@@ -22,9 +22,10 @@ from app.schemas.ops import (
     IncidentListResponse,
     IncidentResponse,
     IncidentSummaryResponse,
+    MetricHeatmapResponse,
     OpsDashboardResponse,
 )
-from app.services import ops_dashboard
+from app.services import metrics_history, ops_dashboard
 
 router = APIRouter(prefix="/ops", tags=["ops"])
 
@@ -45,6 +46,31 @@ async def get_availability(
 ) -> AvailabilityResponse:
     """가용성 현황 조회 [UC21]. 서버별 업타임·MTBF·MTTR·위험뱃지와 시스템 가용성."""
     return await ops_dashboard.get_availability(db)
+
+
+@router.get("/metrics/heatmap", response_model=MetricHeatmapResponse)
+async def get_metrics_heatmap(
+    metric: str = "GPU",
+    window: str = "12h",
+    _user: User = Depends(require_role("MGR", "ADM")),
+    db: AsyncSession = Depends(get_db),
+) -> MetricHeatmapResponse:
+    """서버×시간 메트릭 히트맵 조회(§5). 잘못된 metric·window 는 400.
+
+    삭제되지 않은 서버를 행, 윈도우 균등 버킷을 열로 두고 선택 메트릭의 버킷 평균을 채운다.
+    """
+    if metric not in metrics_history.heatmap_metric_options():
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"metric 은 {metrics_history.heatmap_metric_options()} 중 하나여야 합니다.",
+        )
+    if window not in metrics_history.window_options():
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"window 는 {metrics_history.window_options()} 중 하나여야 합니다.",
+        )
+    data = await metrics_history.build_heatmap(db, metric, window)
+    return MetricHeatmapResponse.model_validate(data)
 
 
 @router.get("/incidents", response_model=IncidentListResponse)
