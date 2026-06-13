@@ -18,6 +18,7 @@ from app.jobs.incident_summary_job import summarize_pending_incidents
 from app.jobs.maintenance_transition_job import transition_maintenance_schedules
 from app.jobs.metric_collection_job import collect_server_metrics
 from app.jobs.reservation_jobs import process_reservation_transitions
+from app.jobs.security_monitoring_job import detect_security_threats
 
 
 def register_jobs(scheduler: AsyncIOScheduler) -> None:
@@ -55,3 +56,6 @@ def register_jobs(scheduler: AsyncIOScheduler) -> None:
     # F30: 점검 스케줄 자동 상태 전환(MAINTENANCE/AVAILABLE)
     scheduler.add_job(transition_maintenance_schedules, "interval", seconds=5,
                       id="maintenance_transition", replace_existing=True)
+    # F37: 보안 위협 탐지·경보
+    scheduler.add_job(detect_security_threats, "interval", seconds=5,
+                      id="security_monitoring", replace_existing=True)

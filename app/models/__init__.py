@@ -1,6 +1,6 @@
 """모든 ORM 모델을 한곳에서 import 해 Base.metadata에 등록한다.
 
-이 패키지를 import 하면 17개 엔티티가 모두 메타데이터에 잡혀
+이 패키지를 import 하면 19개 엔티티가 모두 메타데이터에 잡혀
 마이그레이션·create_all이 빠짐없이 인식한다.
 """
 
@@ -16,6 +16,8 @@ from app.models.queue_entry import QueueEntry
 from app.models.quota import Quota
 from app.models.reservation import Reservation
 from app.models.scheduler_log import SchedulerLog
+from app.models.security_alert import SecurityAlert
+from app.models.security_event import SecurityEvent
 from app.models.server import Server
 from app.models.server_health_history import ServerHealthHistory
 from app.models.server_metric import ServerMetric
@@ -40,4 +42,6 @@ __all__ = [
     "QueueEntry",
     "SchedulerLog",
     "AuditLog",
+    "SecurityEvent",
+    "SecurityAlert",
 ]

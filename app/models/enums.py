@@ -95,3 +95,22 @@ class ForecastMetric(str, Enum):
     MEM = "MEM"
     GPU = "GPU"
     RESERVATION_DEMAND = "RESERVATION_DEMAND"
+
+
+class SecurityEventType(str, Enum):
+    """보안 이벤트 종류(UC26). 기록 출처별로 구분한다."""
+
+    LOGIN_FAILURE = "LOGIN_FAILURE"
+    ACCOUNT_LOCKED = "ACCOUNT_LOCKED"
+    ACCESS_DENIED = "ACCESS_DENIED"
+    ADMIN_ACTION = "ADMIN_ACTION"
+    AGENT_UNREACHABLE = "AGENT_UNREACHABLE"
+
+
+class SecurityAlertType(str, Enum):
+    """탐지된 보안 위협 패턴(UC27). 탐지 잡이 생성한다."""
+
+    BRUTE_FORCE = "BRUTE_FORCE"
+    ACCESS_ABUSE = "ACCESS_ABUSE"
+    AGENT_DOWN = "AGENT_DOWN"
+    ADMIN_ABUSE = "ADMIN_ABUSE"

@@ -21,8 +21,9 @@ backend/
 │   │   ├── reservations.py
 │   │   ├── servers.py         # 서버 CRUD·대안·점검(F01·02·08·14~16) + 건강추세(UC23)
 │   │   ├── ops.py             # 대시보드·가용성(F21·22) + 인시던트·예측·요약(UC22·24·25)
-│   │   ├── admin.py           # 고급 관리 — 운영 데이터 초기화(F35)
+│   │   ├── admin.py           # 고급 관리 — 운영 데이터 초기화(F35) + 보안 초기화
 │   │   ├── quotas.py          # 팀원 Quota 조정(F13)
+│   │   ├── security.py        # 보안 관제 API — 이벤트·경보·요약·해결·시뮬레이션(F38, UC28)
 │   │   ├── users.py           # 계정 잠금 해제(F20)
 │   │   ├── teams.py
 │   │   └── ws.py             # WebSocket (실시간 알림 등)
@@ -40,6 +41,8 @@ backend/
 │   │   ├── maintenance_schedule.py
 │   │   ├── anomaly_record.py
 │   │   ├── forecast.py        # 용량·수요 예측 결과(UC22)
+│   │   ├── security_event.py  # 보안 이벤트(UC26)
+│   │   ├── security_alert.py  # 보안 경보(UC27)
 │   │   ├── audit_log.py
 │   │   └── scheduler_log.py
 │   ├── schemas/               # Pydantic 입출력 스키마
@@ -48,6 +51,7 @@ backend/
 │   │   ├── notification.py
 │   │   ├── admin.py           # 고급 관리 초기화 스키마(F35)
 │   │   ├── ops.py             # AIOps + 대시보드·가용성 스키마
+│   │   ├── security.py        # 보안 관제 스키마(UC26·UC27·UC28)
 │   │   ├── quota.py
 │   │   ├── reservation.py
 │   │   ├── servers.py         # 서버 CRUD·점검 스키마
@@ -56,7 +60,9 @@ backend/
 │   │   ├── auth_service.py
 │   │   ├── approval_service.py
 │   │   ├── notification_service.py
-│   │   ├── admin.py           # 운영 데이터 초기화 로직(F35)
+│   │   ├── admin.py           # 운영 데이터 초기화 로직(F35) + 보안 초기화
+│   │   ├── security_event_service.py  # 보안 이벤트 기록 헬퍼(UC26)
+│   │   ├── security_detection.py      # 보안 위협 탐지 순수 로직(UC27)
 │   │   ├── ops_dashboard.py   # 대시보드·가용성 집계(F21·22)
 │   │   ├── quota_service.py
 │   │   ├── reservation_service.py
@@ -64,7 +70,8 @@ backend/
 │   │   └── users.py           # 계정 잠금 해제 로직
 │   ├── jobs/                  # APScheduler 잡 구현 (scheduler.py 가 등록)
 │   │   ├── approval_jobs.py
-│   │   └── reservation_jobs.py
+│   │   ├── reservation_jobs.py
+│   │   └── security_monitoring_job.py  # 보안 위협 탐지·경보 잡(F37, UC27)
 │   └── core/                  # 보안·예외·공통 의존성 (cross-cutting)
 │       ├── deps.py           # FastAPI 의존성 (get_db / get_current_user / require_role)
 │       ├── exceptions.py     # 서비스 계층 예외 (NotFound / Conflict 등)

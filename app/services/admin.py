@@ -19,6 +19,8 @@ from app.models import (
     QueueEntry,
     Reservation,
     SchedulerLog,
+    SecurityAlert,
+    SecurityEvent,
     ServerHealthHistory,
     ServerMetric,
 )
@@ -82,10 +84,13 @@ async def reset_all(session: AsyncSession) -> ResetResult:
     """전체 운영 데이터 초기화.
 
     마스터 데이터(User, Team, Quota, Server) 제외 모든 운영 데이터를 삭제한다.
-    FK 의존 순서를 지켜 삭제한다.
+    FK 의존 순서를 지켜 삭제한다. 보안 데이터(SecurityAlert·SecurityEvent)도 포함한다.
     """
     deleted = await _count_and_delete(
         session,
+        # 보안 경보 먼저(user FK 참조만, SecurityEvent 와 FK 관계 없음).
+        SecurityAlert,
+        SecurityEvent,
         IncidentSummary,
         AnomalyRecord,
         Incident,
@@ -102,3 +107,10 @@ async def reset_all(session: AsyncSession) -> ResetResult:
     )
     await session.commit()
     return ResetResult(deleted=deleted, message=f"전체 운영 데이터 {deleted}건 삭제됨")
+
+
+async def reset_security(session: AsyncSession) -> ResetResult:
+    """보안 데이터 초기화 — SecurityAlert·SecurityEvent 를 삭제한다."""
+    deleted = await _count_and_delete(session, SecurityAlert, SecurityEvent)
+    await session.commit()
+    return ResetResult(deleted=deleted, message=f"보안 데이터 {deleted}건 삭제됨")

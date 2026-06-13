@@ -5,13 +5,23 @@
 """
 
 import asyncio
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 
 from app.core.security import hash_password
 from app.database import SessionLocal
 from app.models import Server, Team, User
-from app.models.enums import ServerStatus, UserRole
+from app.models.enums import (
+    IncidentSeverity,
+    IncidentStatus,
+    SecurityAlertType,
+    SecurityEventType,
+    ServerStatus,
+    UserRole,
+)
+from app.models.security_alert import SecurityAlert
+from app.models.security_event import SecurityEvent
 
 _SEED_PASSWORD = "password123"
 
@@ -90,7 +100,48 @@ async def seed() -> None:
             ]
         )
         await session.commit()
-    print("시드 완료: 팀 1, 사용자 2(비밀번호 password123), 서버 6")
+
+        # 보안 관제 화면이 시드 직후 비어 보이지 않도록 샘플 이벤트·경보를 추가한다.
+        now = datetime.now(tz=timezone.utc)
+        session.add_all([
+            SecurityEvent(
+                event_type=SecurityEventType.LOGIN_FAILURE.value,
+                severity=IncidentSeverity.INFO.value,
+                source_ip="203.0.113.42",
+                identifier="unknown@example.com",
+                occurred_at=now - timedelta(hours=2),
+            ),
+            SecurityEvent(
+                event_type=SecurityEventType.ACCESS_DENIED.value,
+                severity=IncidentSeverity.WARNING.value,
+                actor_id=1,
+                source_ip="10.0.0.1",
+                detail={"path": "/admin/reset/all"},
+                occurred_at=now - timedelta(hours=1),
+            ),
+            SecurityEvent(
+                event_type=SecurityEventType.ADMIN_ACTION.value,
+                severity=IncidentSeverity.WARNING.value,
+                actor_id=1,
+                target_type="system",
+                detail={"action": "reset_aiops"},
+                occurred_at=now - timedelta(minutes=30),
+            ),
+        ])
+        # 해결된 경보 예시 — 화면에 이력이 보이도록 한다.
+        session.add(SecurityAlert(
+            alert_type=SecurityAlertType.BRUTE_FORCE.value,
+            severity=IncidentSeverity.WARNING.value,
+            status=IncidentStatus.RESOLVED.value,
+            subject="203.0.113.42",
+            event_count=7,
+            message="브루트포스 의심: 203.0.113.42 에서 7회 로그인 실패",
+            started_at=now - timedelta(hours=3),
+            resolved_at=now - timedelta(hours=2),
+        ))
+        await session.commit()
+
+    print("시드 완료: 팀 1, 사용자 2(비밀번호 password123), 서버 6, 보안 이벤트 3건, 경보 1건")
 
 
 if __name__ == "__main__":

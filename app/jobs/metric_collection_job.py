@@ -16,9 +16,10 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from app.config import settings
 from app.database import SessionLocal
 from app.models import Server, ServerMetric
-from app.models.enums import MetricStatus
+from app.models.enums import IncidentSeverity, MetricStatus, SecurityEventType
 from app.services.metric_ingest import agent_metrics_url, parse_metric_payload
 from app.services.scheduler_log import add_scheduler_log
+from app.services.security_event_service import record_event
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +42,17 @@ async def collect_server_metrics(
                     await db.execute(select(Server).where(Server.deleted_at.is_(None)))
                 ).scalars().all()
                 for server in servers:
-                    db.add(await _read_metric(client, server.id))
+                    metric = await _read_metric(client, server.id)
+                    db.add(metric)
+                    # 에이전트 무응답 시 보안 이벤트도 함께 기록한다.
+                    if metric.status == MetricStatus.MISSING.value:
+                        record_event(
+                            db,
+                            event_type=SecurityEventType.AGENT_UNREACHABLE.value,
+                            severity=IncidentSeverity.WARNING.value,
+                            target_type="server",
+                            target_id=str(server.id),
+                        )
                 # 대시보드(F21)용 실행 이력: 이번에 메트릭을 적재한 서버 수를 처리량으로 남긴다.
                 add_scheduler_log(db, "UC14", len(servers))
                 await db.commit()
