@@ -1,7 +1,10 @@
-"""이상탐지 순수 로직(UC18). μ±kσ 기준선 이탈 판정.
+"""이상탐지 순수 로직(UC18). 기준선(μ) 위쪽 이탈만 판정.
 
 DB·스케줄러 비의존. jobs/anomaly_detection_job.py 가 최근 시계열을 넘겨 호출한다.
 표준편차는 모표준편차(statistics.pstdev)를 쓴다 — 기준선 자체의 분산을 본다.
+
+CPU·GPU·MEM·NET 은 모두 "사용량이 높아질 때"가 장애 신호다. 평균보다 낮아진 값
+(사용량 감소)은 문제가 아니므로 이상으로 보지 않는다. 따라서 μ+kσ 위쪽 이탈만 본다.
 """
 
 from collections.abc import Sequence
@@ -31,12 +34,13 @@ def evaluate_anomaly(
     min_samples: int = MIN_SAMPLES,
     k: float = 2.5,
 ) -> AnomalyDecision:
-    """history(최신값 제외) 기준 μ±kσ 밖이면 이상으로 판정한다.
+    """history(최신값 제외) 기준 μ+kσ 위로 벗어나면 이상으로 판정한다.
 
     - 표본이 min_samples 미만이면 항상 비이상(기준선 불신).
     - 표준편차가 0이면 항상 비이상(분산 없는 구간은 단정 불가).
     - 판정용 σ 에는 절대 하한(_MIN_SIGMA)을 두어, 안정 구간의 좁은 밴드 오탐을 막는다.
       반환하는 stddev 는 기록용으로 실제 σ 를 그대로 둔다.
+    - 위쪽 이탈만 본다(latest - μ). 평균 아래로 떨어진 값은 이상으로 보지 않는다.
     """
     if len(history) < min_samples:
         return AnomalyDecision(False, 0.0, 0.0)
@@ -47,4 +51,4 @@ def evaluate_anomaly(
         return AnomalyDecision(False, mu, sigma)
 
     band_sigma = max(sigma, _MIN_SIGMA)
-    return AnomalyDecision(abs(latest - mu) > k * band_sigma, mu, sigma)
+    return AnomalyDecision(latest - mu > k * band_sigma, mu, sigma)

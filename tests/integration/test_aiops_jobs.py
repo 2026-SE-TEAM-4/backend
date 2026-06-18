@@ -78,9 +78,11 @@ async def _seed_cpu_series(db, server_id: int, *, latest_cpu: float) -> None:
         db.add(ServerMetric(server_id=server_id, cpu_usage=50.0 + (1 if i % 2 else -1),
                mem_usage=40.0, net_usage=5.0, gpu_usage=None, status="OK",
                collected_at=base + timedelta(minutes=i)))
-    db.add(ServerMetric(server_id=server_id, cpu_usage=latest_cpu, mem_usage=40.0,
-           net_usage=5.0, gpu_usage=None, status="OK",
-           collected_at=base + timedelta(minutes=61)))
+    # 새 이상탐지는 최근 연속 2표본이 모두 이탈해야 이상으로 본다 → 최신값 2개 적재.
+    for j in range(2):
+        db.add(ServerMetric(server_id=server_id, cpu_usage=latest_cpu, mem_usage=40.0,
+               net_usage=5.0, gpu_usage=None, status="OK",
+               collected_at=base + timedelta(minutes=61 + j)))
 
 
 async def test_detects_cpu_outlier_only(factory):

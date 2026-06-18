@@ -1,7 +1,11 @@
 """이상탐지 잡(F27, UC18).
 
-5분 주기로 활성 서버의 최근 OK 메트릭을 메트릭별 시계열로 모아 μ±2σ 이탈을 판정하고,
-이탈 시 AnomalyRecord 를 기록한다. 같은 서버·메트릭의 연속 기록은 디바운스로 억제한다.
+5분 주기로 활성 서버의 최근 OK 메트릭을 메트릭별 시계열로 모아 기준선 위쪽 이탈을
+판정하고, 이탈 시 AnomalyRecord 를 기록한다. 같은 서버·메트릭의 연속 기록은 디바운스로
+억제한다.
+
+단발성 튐(한 사이클만 잠깐 오른 값)은 무시한다 — 최근 연속 _SUSTAINED_SAMPLES 개
+표본이 '모두' 기준선 밖일 때만 이상으로 본다.
 """
 
 import logging
@@ -23,6 +27,8 @@ _BASELINE_WINDOW = timedelta(days=7)
 _MAX_SAMPLES = 1000
 # 같은 서버·메트릭 이상은 이 시간 내 한 번만 기록(알림 폭주 방지).
 _DEBOUNCE = timedelta(hours=1)
+# 최근 연속 이만큼 표본이 모두 기준선 밖이어야 이상으로 본다(한 사이클 단발 튐 무시).
+_SUSTAINED_SAMPLES = 2
 
 # MetricType → ServerMetric 컬럼명.
 _METRIC_ATTR = {
@@ -70,11 +76,15 @@ async def _detect_for_server(db: AsyncSession, server_id: int, now: datetime) ->
     recorded = 0
     for metric, attr in _METRIC_ATTR.items():
         values = [getattr(r, attr) for r in rows if getattr(r, attr) is not None]
-        if len(values) < MIN_SAMPLES + 1:  # 최신값 1개 + 기준선 표본
+        if len(values) < MIN_SAMPLES + _SUSTAINED_SAMPLES:  # 최신 연속분 + 기준선 표본
             continue
-        latest, history = values[0], values[1:]
-        decision = evaluate_anomaly(history, latest)
-        if decision.is_anomaly and not await _recently_recorded(db, server_id, metric.value, now):
+        # rows 는 최신순이므로 values[:N] 이 가장 최근 연속 표본, 그 이전이 기준선.
+        recent = values[:_SUSTAINED_SAMPLES]
+        baseline = values[_SUSTAINED_SAMPLES:]
+        decisions = [evaluate_anomaly(baseline, v) for v in recent]
+        sustained = all(d.is_anomaly for d in decisions)
+        if sustained and not await _recently_recorded(db, server_id, metric.value, now):
+            latest, decision = recent[0], decisions[0]
             db.add(AnomalyRecord(
                 server_id=server_id,
                 metric=metric.value,
@@ -83,7 +93,7 @@ async def _detect_for_server(db: AsyncSession, server_id: int, now: datetime) ->
                 stddev=decision.stddev,
             ))
             recorded += 1
-            logger.info("이상 감지: 서버 %d %s 값 %.1f", server_id, metric.value, latest)
+            logger.info("이상 감지: 서버 %d %s 값 %.1f (연속 %d표본)", server_id, metric.value, latest, _SUSTAINED_SAMPLES)
     return recorded
 
 

@@ -50,3 +50,10 @@ def test_small_deviation_on_stable_baseline_is_not_anomaly():
     # 하한(8) 덕분에 밴드가 2.5·8=20 이라, 평소 잔떨림 수준의 작은 이탈은 무시한다.
     decision = evaluate_anomaly(_stable_history(), latest=55.0)
     assert decision.is_anomaly is False
+
+
+def test_drop_below_baseline_is_not_anomaly():
+    # 사용량이 평균(50)보다 크게 '떨어진' 값은 장애 신호가 아니므로 이상으로 보지 않는다.
+    # 위쪽 이탈만 판정하므로, 같은 폭이라도 아래로 벗어나면 비이상이다.
+    decision = evaluate_anomaly(_stable_history(), latest=1.0)
+    assert decision.is_anomaly is False
