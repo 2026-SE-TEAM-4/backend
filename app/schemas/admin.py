@@ -1,5 +1,7 @@
 """관리자 고급 기능 API 스키마."""
 
+from datetime import datetime
+
 from pydantic import BaseModel, ConfigDict
 
 
@@ -14,4 +16,16 @@ class ApiSchema(BaseModel):
 
 class ResetResult(ApiSchema):
     deleted: int
+    message: str
+
+
+class RunJobResult(ApiSchema):
+    job_id: str
+    ran_at: datetime
+    ok: bool
+
+
+class SeedAnomalyResult(ApiSchema):
+    server_id: int
+    inserted: int
     message: str

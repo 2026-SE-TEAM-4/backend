@@ -5,6 +5,8 @@
 잡이 API·스케줄러 양쪽에서 이중 실행되는 것을 막기 위함이다.
 """
 
+from collections.abc import Awaitable, Callable
+
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from app.jobs.anomaly_detection_job import detect_anomalies
@@ -20,42 +22,31 @@ from app.jobs.metric_collection_job import collect_server_metrics
 from app.jobs.reservation_jobs import process_reservation_transitions
 from app.jobs.security_monitoring_job import detect_security_threats
 
+# 잡 단일 정의: (id, 콜러블, 데모 주기 초). 등록과 수동 트리거(/admin/run-job)가
+# 모두 이 목록 하나만 참조하도록 해 목록 중복을 막는다. 괄호 안은 원래 설계 주기.
+_JOB_SPECS: list[tuple[str, Callable[..., Awaitable[None]], int]] = [
+    ("reservation_transitions", process_reservation_transitions, 5),   # UC16 (설계 1분)
+    ("approval_timeout", auto_reject_timed_out_requests, 5),           # UC17 (설계 1분)
+    ("metric_collection", collect_server_metrics, 5),                  # P0 (설계 1분)
+    ("anomaly_detection", detect_anomalies, 5),                        # F27 (설계 5분)
+    ("health_score", compute_health_scores, 10),                      # F28 (설계 10분)
+    ("incident_correlation", correlate_anomalies, 5),                 # F33 (설계 5분)
+    ("forecast", generate_forecasts, 30),                            # F31 (설계 60분)
+    ("incident_summary", summarize_pending_incidents, 10),           # F34 (설계 5분)
+    ("failure_prediction", predict_failures, 15),                    # F32 (설계 10분)
+    ("idle_reclaim", reclaim_idle_servers, 5),                       # F24 (설계 1분)
+    ("maintenance_transition", transition_maintenance_schedules, 5),  # F30 (설계 1분)
+    ("security_monitoring", detect_security_threats, 5),             # F37 (설계 5분)
+]
+
+# job_id → 콜러블. 수동 트리거 엔드포인트가 이 매핑으로 잡을 찾는다.
+JOB_REGISTRY: dict[str, Callable[..., Awaitable[None]]] = {
+    job_id: func for job_id, func, _ in _JOB_SPECS
+}
+
 
 def register_jobs(scheduler: AsyncIOScheduler) -> None:
     """모든 주기 잡을 스케줄러에 등록한다. id별 멱등(replace_existing)."""
-    # UC16: 예약 만료·사용 시작 자동 전이
-    scheduler.add_job(process_reservation_transitions, "interval", seconds=5,
-                      id="reservation_transitions", replace_existing=True)
-    # UC17: 72시간 초과 PENDING 승인 요청 자동 거절
-    scheduler.add_job(auto_reject_timed_out_requests, "interval", seconds=5,
-                      id="approval_timeout", replace_existing=True)
-    # P0: 서버풀 메트릭 수집
-    scheduler.add_job(collect_server_metrics, "interval", seconds=5,
-                      id="metric_collection", replace_existing=True)
-    # F27: 이상탐지
-    scheduler.add_job(detect_anomalies, "interval", seconds=5,
-                      id="anomaly_detection", replace_existing=True)
-    # F28: 건강점수 산출
-    scheduler.add_job(compute_health_scores, "interval", seconds=10,
-                      id="health_score", replace_existing=True)
-    # F33: 인시던트 상관(이상 묶기·노이즈 감소)
-    scheduler.add_job(correlate_anomalies, "interval", seconds=5,
-                      id="incident_correlation", replace_existing=True)
-    # F31: 용량·수요 예측(Holt-Winters, 7일 데이터 연산 비용 고려)
-    scheduler.add_job(generate_forecasts, "interval", seconds=30,
-                      id="forecast", replace_existing=True)
-    # F34: LLM 원인 요약(OPEN 인시던트당 1회, 키 없으면 잡 내부에서 건너뜀)
-    scheduler.add_job(summarize_pending_incidents, "interval", seconds=10,
-                      id="incident_summary", replace_existing=True)
-    # F32: 장애·건강 열화 예측(7일 추세 + 위험도, F28 직후)
-    scheduler.add_job(predict_failures, "interval", seconds=15,
-                      id="failure_prediction", replace_existing=True)
-    # F24: 유휴 서버 감지·자동 회수(경고 후 회수)
-    scheduler.add_job(reclaim_idle_servers, "interval", seconds=5,
-                      id="idle_reclaim", replace_existing=True)
-    # F30: 점검 스케줄 자동 상태 전환(MAINTENANCE/AVAILABLE)
-    scheduler.add_job(transition_maintenance_schedules, "interval", seconds=5,
-                      id="maintenance_transition", replace_existing=True)
-    # F37: 보안 위협 탐지·경보
-    scheduler.add_job(detect_security_threats, "interval", seconds=5,
-                      id="security_monitoring", replace_existing=True)
+    for job_id, func, seconds in _JOB_SPECS:
+        scheduler.add_job(func, "interval", seconds=seconds,
+                          id=job_id, replace_existing=True)

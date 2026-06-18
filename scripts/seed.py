@@ -44,6 +44,8 @@ async def seed() -> None:
                      team_id=team.id, hashed_password=hashed),
                 User(name="김관리", email="kim@example.com", role=UserRole.MGR.value,
                      team_id=team.id, hashed_password=hashed),
+                User(name="관리자", email="admin@example.com", role=UserRole.ADM.value,
+                     team_id=team.id, hashed_password=hashed),
             ]
         )
 
@@ -141,7 +143,7 @@ async def seed() -> None:
         ))
         await session.commit()
 
-    print("시드 완료: 팀 1, 사용자 2(비밀번호 password123), 서버 6, 보안 이벤트 3건, 경보 1건")
+    print("시드 완료: 팀 1, 사용자 3(비밀번호 password123), 서버 6, 보안 이벤트 3건, 경보 1건")
 
 
 if __name__ == "__main__":

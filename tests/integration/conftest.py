@@ -63,3 +63,30 @@ async def client(containers):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
     await engine.dispose()
+
+
+@pytest_asyncio.fixture
+def auth_headers(client):
+    """역할별 Authorization 헤더를 만들어 주는 팩토리.
+
+    여러 test_*_api.py 에 복붙돼 있던 register→login 헬퍼를 한 곳으로 모은다.
+    호출: headers = await auth_headers("ADM")  → {"Authorization": "Bearer ..."}
+    같은 역할로 두 번 호출하면 이메일이 겹치므로 호출마다 고유 이메일을 만든다.
+    """
+    counter = {"n": 0}
+
+    async def _make(role: str) -> dict[str, str]:
+        counter["n"] += 1
+        email = f"{role.lower()}-rbac-{counter['n']}@example.com"
+        await client.post(
+            "/auth/register",
+            json={"name": role, "email": email, "password": "password123",
+                  "role": role, "teamId": 1},
+        )
+        login = await client.post(
+            "/auth/login", json={"email": email, "password": "password123"}
+        )
+        token = login.json()["accessToken"]
+        return {"Authorization": f"Bearer {token}"}
+
+    return _make
